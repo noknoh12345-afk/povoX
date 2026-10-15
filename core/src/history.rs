@@ -84,7 +84,7 @@ pub fn seed_mock(history: &mut Vec<UsageSample>, now_ms: i64, left_now_kb: f64) 
         let t = now_ms - (k as i64) * step;
         points.push(UsageSample { t_ms: t, left_kb: left, unlimited: false });
         // 時刻(日本時間)で使い方を変える
-        let hour = ((t / 1000 + 9 * 3600).rem_euclid(86_400) / 3600) as i64;
+        let hour = (t / 1000 + 9 * 3600).rem_euclid(86_400) / 3600;
         let per_30min_kb = match hour {
             0..=6 => 2_000.0,
             7..=9 => 40_000.0,

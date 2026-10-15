@@ -135,9 +135,10 @@ jobs:
           codesign -f -s - --entitlements PovoX/Support/PovoX.entitlements Payload/PovoX.app
           codesign -d --entitlements - Payload/PovoX.app 2>/dev/null | head -20 || true
           zip -qry povoX.ipa Payload
-          # ウィジェットなし版(App Group が使えない署名方法向け)
+          # ウィジェットなし版(App Group が使えない署名方法向け): 拡張も App Group の権限も持たない
           rm -rf Payload/PovoX.app/PlugIns
-          codesign -f -s - --entitlements PovoX/Support/PovoX.entitlements Payload/PovoX.app
+          codesign -f -s - Payload/PovoX.app
+          codesign -d --entitlements - Payload/PovoX.app 2>/dev/null | head -5 || true
           zip -qry povoX-nowidget.ipa Payload
           ls -lh *.ipa
 

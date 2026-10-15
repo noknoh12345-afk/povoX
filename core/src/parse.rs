@@ -11,7 +11,7 @@ fn parse(raw: &str) -> Option<Value> {
     serde_json::from_str(raw).ok()
 }
 
-fn s<'a>(v: Option<&'a Value>, keys: &[&str]) -> Option<String> {
+fn s(v: Option<&Value>, keys: &[&str]) -> Option<String> {
     let obj = v?.as_object()?;
     keys.iter().find_map(|k| {
         obj.get(*k).and_then(|x| match x {
