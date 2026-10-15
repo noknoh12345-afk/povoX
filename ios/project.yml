@@ -1,4 +1,6 @@
-# XcodeGen の定義。`xcodegen generate` で PovoX.xcodeproj を作る(CI で毎回生成する)。
+# XcodeGen の定義。CI で `xcodegen generate` して PovoX.xcodeproj を作る。
+# 先に用意するもの(CI がやる):
+#   core を iOS 向けにビルド(libpovo_auto.a)と、Swift の型の生成(ios/Generated/povo_auto.swift ほか)
 name: PovoX
 options:
   bundleIdPrefix: jp.povox
@@ -8,28 +10,87 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    DEAD_CODE_STRIPPING: YES
 targets:
   PovoX:
     type: application
     platform: iOS
     sources:
       - path: PovoX
+        excludes:
+          - "Resources/**"
+      - path: PovoX/Resources
+        buildPhase: resources
+      - path: Generated
+        includes:
+          - "*.swift"
+    dependencies:
+      - target: PovoXWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.povox.app
         PRODUCT_NAME: povoX
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_FILE: PovoX/Support/Info.plist
         GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: PovoX/Support/PovoX.entitlements
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_OBJC_BRIDGING_HEADER: PovoX/Support/PovoX-Bridging-Header.h
-        HEADER_SEARCH_PATHS: $(PROJECT_DIR)/../core/include
-        # Rust のエンジン(core/)を静的リンクする。先に
-        # `cargo build --release --target aarch64-apple-ios` で libpovo_auto.a を作っておく。
+        HEADER_SEARCH_PATHS: $(PROJECT_DIR)/Generated
         "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]": $(PROJECT_DIR)/../core/target/aarch64-apple-ios/release
-        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": $(PROJECT_DIR)/../core/target/aarch64-apple-ios-sim/release
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": $(PROJECT_DIR)/../core/target/aarch64-apple-ios-sim/debug
         OTHER_LDFLAGS: -lpovo_auto
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ENABLE_USER_SCRIPT_SANDBOXING: NO
-        DEAD_CODE_STRIPPING: YES
+  PovoXWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PovoXWidget
+      - path: PovoX/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.povox.app.widget
+        PRODUCT_NAME: PovoXWidget
+        INFOPLIST_FILE: PovoXWidget/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: PovoXWidget/PovoXWidget.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+  PovoXTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PovoXTests
+    dependencies:
+      - target: PovoX
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.povox.app.tests
+  PovoXUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: PovoXUITests
+    dependencies:
+      - target: PovoX
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.povox.app.uitests
+        TEST_TARGET_NAME: PovoX
+schemes:
+  PovoX:
+    build:
+      targets:
+        PovoX: all
+    test:
+      config: Debug
+      targets:
+        - PovoXTests
+        - PovoXUITests

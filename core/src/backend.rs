@@ -67,14 +67,19 @@ pub type R<T> = Result<T, Failure>;
 #[derive(Clone)]
 pub enum Backend {
     Real(Arc<PovoClient>),
-    Mock(Arc<std::sync::Mutex<Option<String>>>),
+    Mock(Arc<std::sync::Mutex<mock::MockState>>),
 }
 
 impl Backend {
     /// povo-android の `PovoAccountClient.create` と同じ設定で作る。
     pub fn new(mock: bool, device_id: &str) -> Self {
+        Self::with_scenario(mock, device_id, "")
+    }
+
+    /// モックの筋書き付き("low" は残りわずかから始める)。
+    pub fn with_scenario(mock: bool, device_id: &str, scenario: &str) -> Self {
         if mock {
-            return Backend::Mock(Arc::new(std::sync::Mutex::new(None)));
+            return Backend::Mock(Arc::new(std::sync::Mutex::new(mock::MockState::new(scenario))));
         }
         let client = PovoClient::new(device_id.to_string(), protocol::APP_VERSION.to_string());
         client.set_user_agent(protocol::USER_AGENT.to_string());
@@ -87,14 +92,14 @@ impl Backend {
                 c.set_auth_token(token.to_string());
                 c.set_service_instance_number(sin);
             }
-            Backend::Mock(t) => *t.lock().unwrap() = Some(token.to_string()),
+            Backend::Mock(m) => m.lock().unwrap_or_else(|e| e.into_inner()).token = Some(token.to_string()),
         }
     }
 
     pub fn token(&self) -> Option<String> {
         match self {
             Backend::Real(c) => c.auth_token(),
-            Backend::Mock(t) => t.lock().unwrap().clone(),
+            Backend::Mock(m) => m.lock().unwrap_or_else(|e| e.into_inner()).token.clone(),
         }
     }
 
@@ -157,13 +162,13 @@ impl Backend {
                 }
                 Ok(t.auth_token)
             }
-            Backend::Mock(tok) => {
+            Backend::Mock(m) => {
                 let code = email_auth.or(mobile_auth).map(|a| a.otp_code).unwrap_or_default();
                 if code != "000000" {
                     return Err(Failure { povo_status: Some(400), ..Failure::local("(モック)コードは 000000 です") });
                 }
                 let t = mock_jwt();
-                *tok.lock().unwrap() = Some(t.clone());
+                m.lock().unwrap_or_else(|e| e.into_inner()).token = Some(t.clone());
                 Ok(t)
             }
         }
@@ -179,9 +184,9 @@ impl Backend {
         }
         match self {
             Backend::Real(c) => Ok(Some(c.refresh_token()?.auth_token)),
-            Backend::Mock(tok) => {
+            Backend::Mock(m) => {
                 let t = mock_jwt();
-                *tok.lock().unwrap() = Some(t.clone());
+                m.lock().unwrap_or_else(|e| e.into_inner()).token = Some(t.clone());
                 Ok(Some(t))
             }
         }
@@ -215,7 +220,7 @@ impl Backend {
     pub fn usage_raw(&self) -> R<String> {
         match self {
             Backend::Real(c) => Ok(c.get_plan_usage_json()?),
-            Backend::Mock(_) => Ok(mock::USAGE.into()),
+            Backend::Mock(m) => Ok(m.lock().unwrap_or_else(|e| e.into_inner()).usage_json()),
         }
     }
 
@@ -223,13 +228,15 @@ impl Backend {
     pub fn quilt(&self, page: &str) -> R<String> {
         match self {
             Backend::Real(c) => Ok(c.get_quilt_page_json(page.to_string())?),
-            Backend::Mock(_) => Ok(match page {
-                "user-plan-details-v2" => mock::USER_PLAN_DETAILS,
-                "order-history" => mock::ORDER_HISTORY,
-                "dashboard-v2" => mock::DASHBOARD,
-                _ => "{}",
+            Backend::Mock(m) => {
+                let mut m = m.lock().unwrap_or_else(|e| e.into_inner());
+                Ok(match page {
+                    "user-plan-details-v2" => m.plan_details_json(),
+                    "order-history" => m.order_history_json(),
+                    "dashboard-v2" => mock::DASHBOARD.into(),
+                    _ => "{}".into(),
+                })
             }
-            .into()),
         }
     }
 
@@ -261,17 +268,7 @@ impl Backend {
                 });
                 Ok(c.post_json("shop/orders".into(), None, "v2".into(), "ja".into(), body.to_string())?)
             }
-            // 停止動作の確認用: この商品IDだけ povo の 403001 を真似る。
-            Backend::Mock(_) if sku == "MOCK_FORBIDDEN" => Err(PovoError::Api {
-                status: 403,
-                server_message: "(モック)device mismatch".into(),
-                code: Some(403001),
-                title: None,
-                detail: None,
-                block_until_epoch_millis: None,
-            }
-            .into()),
-            Backend::Mock(_) => Ok(mock::order_response(sku)),
+            Backend::Mock(m) => Ok(m.lock().unwrap_or_else(|e| e.into_inner()).order(sku)?),
         }
     }
 
@@ -291,7 +288,7 @@ impl Backend {
                 form.insert("code".to_string(), code.to_string());
                 Ok(c.post_form("promotions/code/set".into(), None, "v4".into(), "ja".into(), form)?)
             }
-            Backend::Mock(_) => mock::code_response(code),
+            Backend::Mock(m) => Ok(m.lock().unwrap_or_else(|e| e.into_inner()).apply_code(code)?),
         }
     }
 }

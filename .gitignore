@@ -1,7 +1,8 @@
 core/target/
 ios/build/
+ios/Generated/
 ios/PovoX.xcodeproj/
 ios/Payload/
 ios/*.ipa
-ios/xcodebuild.log
+ci/
 .DS_Store

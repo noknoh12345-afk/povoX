@@ -1,15 +1,19 @@
-//! 開発用: `cargo run --example cli -- <dir> '<要求JSON>'`。モックで1要求だけ処理して応答を出す。
-//! (スクリプトの API をパソコン上で試すため。アプリには入らない。)
+//! 開発用: `cargo run --example cli -- <dir> <op> '<引数JSON>'`。
+//! モックのエンジンで1つの操作を JSON で処理して応答を出す(ルールをパソコン上で試すため)。
+//! ログイン手続きはプロセスの中にしか残らないので、未ログインならここで済ませる。
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let dir = args.get(1).expect("dir");
-    let req = args.get(2).expect("request json");
-    let init = serde_json::json!({"op": "init", "dir": dir, "mock": true}).to_string();
-    let st: serde_json::Value = serde_json::from_str(&povo_auto::handle_json(&init)).unwrap();
-    if st["result"]["logged_in"] != true {
-        // ログイン手続きはプロセス内にしか残らないので、モックではここで済ませる。
-        povo_auto::handle_json(r#"{"op":"login_start","email":"dev@example.com"}"#);
-        povo_auto::handle_json(r#"{"op":"login_otp","code":"000000"}"#);
+    let dir = args.get(1).expect("dir").clone();
+    let op = args.get(2).expect("op").clone();
+    let a: serde_json::Value = args.get(3).map(|s| serde_json::from_str(s).expect("json")).unwrap_or(serde_json::Value::Null);
+    let scenario = std::env::var("MOCK_SCENARIO").unwrap_or_default();
+    let eng = povo_auto::PovoEngine::new(
+        povo_auto::EngineConfig { dir, mock: true, mock_scenario: scenario },
+        Box::new(povo_auto::MemoryStore::default()),
+    );
+    if !eng.status().logged_in {
+        eng.login_start(Some("dev@example.com".into()), None).expect("login_start");
+        eng.login_otp("000000".into()).expect("login_otp");
     }
-    println!("{}", povo_auto::handle_json(req));
+    println!("{}", eng.dev_call(&op, &a));
 }

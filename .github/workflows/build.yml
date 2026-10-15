@@ -1,4 +1,4 @@
-name: Build IPA
+name: Build & Test
 
 on:
   push:
@@ -12,37 +12,47 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+
 jobs:
-  ipa:
+  ios:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
-      - name: Toolchain info
+      - name: Toolchain
         run: |
           xcodebuild -version
-          rustc --version || true
-          cargo --version || true
+          rustc --version
+          xcrun simctl list runtimes | grep -i ios || true
 
-      - name: Rust target
-        run: rustup target add aarch64-apple-ios
+      - name: Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core
 
-      - name: Test core (mock, no network to povo)
+      - name: Rust tests (mock, no network to povo)
         working-directory: core
         run: cargo test --lib
 
-      - name: Build core for iOS
+      - name: Swift bindings (UniFFI)
         working-directory: core
-        env:
-          IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         run: |
-          cargo build --release --lib --target aarch64-apple-ios
-          ls -lh target/aarch64-apple-ios/release/libpovo_auto.a
+          cargo build --lib
+          cargo run --bin uniffi-bindgen -- generate --library target/debug/libpovo_auto.dylib \
+            --language swift --out-dir ../ios/Generated --crate povo_auto
+          ls -la ../ios/Generated
+
+      - name: Rust for iOS (simulator debug + device release)
+        working-directory: core
+        run: |
+          cargo build --lib --target aarch64-apple-ios-sim
+          cargo build --lib --release --target aarch64-apple-ios
+          ls -lh target/aarch64-apple-ios-sim/debug/libpovo_auto.a target/aarch64-apple-ios/release/libpovo_auto.a
 
       - name: Generate Xcode project
         working-directory: ios
@@ -50,61 +60,142 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build app (unsigned)
+      - name: Pick simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys, re
+          d = json.load(sys.stdin)["devices"]
+          def ver(rt):
+              m = re.search(r"iOS-(\d+)-(\d+)", rt)
+              return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+          cands = []
+          for rt, devs in d.items():
+              if "iOS" not in rt:
+                  continue
+              for x in devs:
+                  n = x["name"]
+                  score = 3 if re.fullmatch(r"iPhone 1[5-7]", n) else (2 if n.startswith("iPhone 1") and "Plus" not in n and "Max" not in n else (1 if n.startswith("iPhone") else 0))
+                  if score:
+                      cands.append((score, ver(rt), x["udid"], n, rt))
+          cands.sort(reverse=True)
+          print(cands[0][2])
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time "9:41" --dataNetwork 5g --cellularMode active --cellularBars 4 --wifiBars 3 --batteryState discharging --batteryLevel 80 || true
+          xcrun simctl list devices | grep "$UDID"
+
+      - name: Test in simulator (unit + UI, screenshots)
+        id: test
+        continue-on-error: true
         working-directory: ios
         run: |
           set -o pipefail
-          xcodebuild -project PovoX.xcodeproj -target PovoX -configuration Release \
-            -sdk iphoneos SYMROOT="$PWD/build" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee xcodebuild.log | grep -E "error:|\*\* BUILD" || true
+          mkdir -p ../ci/shots
+          TEST_RUNNER_SHOT_DIR="$GITHUB_WORKSPACE/ci/shots" xcodebuild test \
+            -project PovoX.xcodeproj -scheme PovoX \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath ../ci/TestResults.xcresult \
+            CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee ../ci/test.log | grep -E "error:|warning: .*(deprecated|unused)|Test Case .*(passed|failed)|Executed|\*\* TEST" || true
           test "${PIPESTATUS[0]}" -eq 0
 
-      - name: Report build errors
-        if: failure()
+      - name: Build device app (Release, unsigned)
+        id: device
+        working-directory: ios
         run: |
-          # 失敗理由を Actions の注釈に出す(ログを開かなくても見えるように)
-          for f in ios/xcodebuild.log; do
-            [ -f "$f" ] && grep -E "error:" "$f" | sort -u | head -40 | while IFS= read -r line; do
-              echo "::error::${line//$'\n'/ }"
-            done || true
-          done
-          # ログ全体を ci-logs ブランチに置く
-          mkdir -p /tmp/ci-logs
-          cp ios/xcodebuild.log /tmp/ci-logs/ 2>/dev/null || true
-          cd /tmp/ci-logs
+          set -o pipefail
+          xcodebuild build -project PovoX.xcodeproj -scheme PovoX -configuration Release \
+            -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath build/device \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee ../ci/build-device.log | grep -E "error:|\*\* BUILD" || true
+          test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Package IPAs
+        working-directory: ios
+        run: |
+          APP=build/device/Build/Products/Release-iphoneos/povoX.app
+          test -d "$APP"
+          ls "$APP" "$APP/PlugIns" || true
+          test -d "$APP/Metadata.appintents" && echo "App Intents metadata: OK" || echo "::warning::App Intents metadata not found"
+          # 署名ツールが App Group を引き継げるよう、権限(entitlements)を仮の署名で埋め込む
+          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+          if [ -d Payload/povoX.app/PlugIns/PovoXWidget.appex ]; then
+            codesign -f -s - --entitlements PovoXWidget/PovoXWidget.entitlements Payload/povoX.app/PlugIns/PovoXWidget.appex
+          fi
+          codesign -f -s - --entitlements PovoX/Support/PovoX.entitlements Payload/povoX.app
+          codesign -d --entitlements - Payload/povoX.app 2>/dev/null | head -20 || true
+          zip -qry povoX.ipa Payload
+          # ウィジェットなし版(App Group が使えない署名方法向け)
+          rm -rf Payload/povoX.app/PlugIns
+          codesign -f -s - --entitlements PovoX/Support/PovoX.entitlements Payload/povoX.app
+          zip -qry povoX-nowidget.ipa Payload
+          ls -lh *.ipa
+
+      - name: Collect test report
+        if: always()
+        run: |
+          mkdir -p ci
+          if [ -d ci/TestResults.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path ci/TestResults.xcresult > ci/test-summary.json 2>/dev/null || true
+            xcrun xcresulttool get test-results tests --path ci/TestResults.xcresult > ci/test-tests.json 2>/dev/null || true
+          fi
+          grep -E "error:|failed|Test Case" ci/test.log > ci/test-key-lines.txt 2>/dev/null || true
+          grep -E "error:" ci/build-device.log > ci/build-errors.txt 2>/dev/null || true
+          ls -la ci ci/shots 2>/dev/null | head -80
+
+      - name: Publish screenshots and logs (ci-artifacts branch)
+        if: always()
+        run: |
+          rm -rf /tmp/ci-out && mkdir -p /tmp/ci-out
+          cp -R ci/shots /tmp/ci-out/ 2>/dev/null || true
+          cp ci/*.txt ci/*.json /tmp/ci-out/ 2>/dev/null || true
+          tail -c 3000000 ci/test.log > /tmp/ci-out/test.log 2>/dev/null || true
+          tail -c 2000000 ci/build-device.log > /tmp/ci-out/build-device.log 2>/dev/null || true
+          echo "${GITHUB_SHA}" > /tmp/ci-out/SHA
+          echo "test=${{ steps.test.outcome }} device=${{ steps.device.outcome }}" > /tmp/ci-out/STATUS
+          cd /tmp/ci-out
           git init -q
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add -A
-          git commit -q -m "logs for ${GITHUB_SHA}" || exit 0
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-logs || true
-
-      - name: Package IPA
-        working-directory: ios
-        run: |
-          APP=build/Release-iphoneos/povoX.app
-          test -d "$APP"
-          ls "$APP"
-          test -d "$APP/Metadata.appintents" && echo "App Intents metadata: OK" || echo "::warning::App Intents metadata not found"
-          rm -rf Payload && mkdir Payload
-          cp -R "$APP" Payload/
-          zip -qry povoX.ipa Payload
-          ls -lh povoX.ipa
+          git commit -q -m "CI artifacts for ${GITHUB_SHA}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-artifacts
 
       - uses: actions/upload-artifact@v4
         with:
           name: povoX-ipa
-          path: ios/povoX.ipa
+          path: |
+            ios/povoX.ipa
+            ios/povoX-nowidget.ipa
           if-no-files-found: error
 
-      - name: Publish to Releases (latest)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-screenshots
+          path: ci/shots
+          if-no-files-found: ignore
+
+      - name: Publish to Releases
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" ios/povoX.ipa \
-            --title "povoX build ${GITHUB_RUN_NUMBER}" \
-            --notes "未署名の IPA です。Sideloadly などで自分の Apple ID で署名して入れてください。commit ${GITHUB_SHA::7}" \
-            --target "${GITHUB_SHA}" --latest
+          NOTE="未署名の IPA です。Sideloadly などで自分の Apple ID で署名して入れてください。
+          - povoX.ipa: ウィジェット付き
+          - povoX-nowidget.ipa: ウィジェットなし(署名ツールが App Group / 拡張機能に対応していないとき)
+          シミュレータのテスト: ${{ steps.test.outcome }}
+          commit ${GITHUB_SHA::7}"
+          FLAGS="--latest"
+          if [ "${{ steps.test.outcome }}" != "success" ]; then FLAGS="--prerelease"; fi
+          gh release create "$TAG" ios/povoX.ipa ios/povoX-nowidget.ipa --title "povoX build ${GITHUB_RUN_NUMBER}" --notes "$NOTE" --target "${GITHUB_SHA}" $FLAGS
+
+      - name: Fail if tests failed
+        if: steps.test.outcome != 'success'
+        run: |
+          echo "::error::シミュレータのテストが失敗しました。ci-artifacts ブランチの test-key-lines.txt を見てください。"
+          exit 1

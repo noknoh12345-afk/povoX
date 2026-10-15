@@ -1,59 +1,55 @@
 import SwiftUI
 import UIKit
-import UserNotifications
 
 @main
 struct PovoXApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var model = AppModel()
+    @StateObject private var store = AppStore()
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(model)
+                .environmentObject(store)
+                .preferredColorScheme(scheme)
+                .tint(Theme.accent)
         }
-        .onChange(of: phase) { p in
+        .onChange(of: phase) { _, p in
             switch p {
             case .active:
                 Task {
-                    await model.reloadLocal()
-                    await model.refresh(force: false)
-                    model.startForegroundTimer()
+                    await store.reload()
+                    await store.refresh(force: false)
+                    store.startForeground()
                 }
             case .background:
-                model.stopForegroundTimer()
-                Automation.scheduleBackgroundRefresh()
+                store.stopForeground()
+                Task { await AppServices.shared.afterChange(summary: store.runs.first?.summary) }
             default:
                 break
             }
         }
     }
+
+    private var scheme: ColorScheme? {
+        let l = AppServices.shared.launch
+        if l.forceDark { return .dark }
+        if l.forceLight { return .light }
+        return nil
+    }
 }
 
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        let services = AppServices.shared
         // バックグラウンド更新の登録は起動処理の中で済ませる必要がある。
-        Automation.registerBackgroundTask()
-        _ = Core.shared
-        UNUserNotificationCenter.current().delegate = self
-        Automation.requestNotificationPermission()
-        Automation.scheduleBackgroundRefresh()
+        if !services.launch.uiTest {
+            BackgroundScheduler.register {
+                await services.automation.run(trigger: "background") != nil
+            }
+        }
+        services.notifications.register()
         return true
     }
-
-    // アプリを開いているときも通知を出す。
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
-    }
-}
-
-enum Theme {
-    /// povo の黄色(公式アプリの値)。
-    static let yellow = Color(red: 1.0, green: 0.961, blue: 0.0)
-    static let ink = Color.primary
-    static let groove = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.22, alpha: 1) : UIColor(red: 0.925, green: 0.941, blue: 0.957, alpha: 1) })
-    static let danger = Color(red: 0.86, green: 0.18, blue: 0.2)
 }

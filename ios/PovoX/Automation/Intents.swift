@@ -1,45 +1,93 @@
 import AppIntents
 import Foundation
 
-/// ショートカット用: 自動チェック(スクリプト)を1回動かす。
+/// ショートカット: 自動チェックを1回動かす(オートメーションのきっかけに使う)。
 struct RunCheckIntent: AppIntent {
     static var title: LocalizedStringResource = "povoXの自動チェック"
-    static var description = IntentDescription("povo の残量を取得し、povoX のルール(スクリプト)を実行します。購入・コード適用は povoX の安全装置の範囲内だけで行います。")
+    static var description = IntentDescription("povo の残量を取得し、povoX のルールを実行します。購入・コードは povoX の安全装置(確認・上限)の範囲だけで行います。")
     static var openAppWhenRun = false
 
-    @Parameter(title: "きっかけ", description: "スクリプトの ctx.trigger に入る文字(例: battery-low)", default: "shortcut")
+    @Parameter(title: "きっかけ", description: "ルールの ctx.trigger に入る文字(例: battery-low)", default: "shortcut")
     var trigger: String
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let report = await Automation.shared.run(trigger: trigger.isEmpty ? "shortcut" : trigger)
-        let text = report.ok ? report.summary : "エラー: \(report.summary)"
+        let services = AppServices.shared
+        guard let record = await services.automation.run(trigger: trigger.isEmpty ? "shortcut" : trigger) else {
+            let st = await services.client.value { $0.status() }
+            let why = !st.loggedIn ? "ログインしていません" : (st.halted != nil ? "安全のため通信を止めています。アプリで確認してください" : "別の自動チェックが動いています")
+            return .result(value: why, dialog: IntentDialog(stringLiteral: why))
+        }
+        let text = record.error.map { "エラー: \($0)" } ?? record.summary
         return .result(value: text, dialog: IntentDialog(stringLiteral: text))
     }
 }
 
-/// ショートカット用: データ残量(GB)を返す。
+/// ショートカット: データ残量(GB)を返す。
 struct RemainingDataIntent: AppIntent {
     static var title: LocalizedStringResource = "povoXのデータ残量"
     static var description = IntentDescription("povo のデータ残量を GB で返します(30秒以内に取得していればその値)。")
     static var openAppWhenRun = false
 
     func perform() async throws -> some IntentResult & ReturnsValue<Double> & ProvidesDialog {
-        let result: Result<Snapshot, CoreError> = await withCheckedContinuation { cont in
-            DispatchQueue.global().async {
-                cont.resume(returning: Core.shared.decode("snapshot", ["force": false], as: Snapshot.self))
-            }
-        }
-        switch result {
-        case .success(let s):
-            guard let gb = s.leftGB else {
-                throw IntentFailure(message: "残量を読めませんでした")
-            }
-            let unl = s.unlimitedActive == true ? "(使い放題中)" : ""
-            return .result(value: (gb * 100).rounded() / 100,
-                           dialog: IntentDialog(stringLiteral: String(format: "残り %.2fGB", gb) + unl))
-        case .failure(let e):
+        let client = AppServices.shared.client
+        do {
+            let snap = try await client.call { try $0.snapshot(force: false) }
+            guard let kb = snap.leftKb else { throw IntentFailure(message: "残量を読めませんでした") }
+            let gb = (kb / Fmt.kbPerGB * 100).rounded() / 100
+            let suffix = snap.unlimited.active == true ? "(使い放題中)" : ""
+            return .result(value: gb, dialog: IntentDialog(stringLiteral: "残り \(Fmt.data(kb: kb))\(suffix)"))
+        } catch let e as PovoXError {
             throw IntentFailure(message: e.message)
         }
+    }
+}
+
+enum PurchaseModeOption: String, AppEnum {
+    case off, confirm, auto
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "購入のしかた"
+    static var caseDisplayRepresentations: [PurchaseModeOption: DisplayRepresentation] = [
+        .off: "しない",
+        .confirm: "通知で確認",
+        .auto: "自動",
+    ]
+
+    var mode: ActionMode {
+        switch self {
+        case .off: return .off
+        case .confirm: return .confirm
+        case .auto: return .auto
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .off: return "しない"
+        case .confirm: return "通知で確認"
+        case .auto: return "自動"
+        }
+    }
+}
+
+/// ショートカット: ルールによる購入のしかたを切り替える(例: 旅行中だけ自動にする)。
+struct SetPurchaseModeIntent: AppIntent {
+    static var title: LocalizedStringResource = "povoXの購入のしかたを変える"
+    static var description = IntentDescription("ルールによるトッピング購入を「しない / 通知で確認 / 自動」に切り替えます。")
+    static var openAppWhenRun = false
+
+    @Parameter(title: "購入のしかた", default: .confirm)
+    var mode: PurchaseModeOption
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let client = AppServices.shared.client
+        let target = mode.mode
+        _ = await client.value { e -> Settings in
+            var s = e.settings()
+            s.purchaseMode = target
+            return e.updateSettings(settings: s)
+        }
+        await MainActor.run { NotificationCenter.default.post(name: .povoxDidChange, object: nil) }
+        return .result(dialog: IntentDialog(stringLiteral: "ルールによる購入を「\(mode.label)」にしました"))
     }
 }
 

@@ -1,148 +1,41 @@
-//! povoX のエンジン。iOS アプリ(画面・スクリプト・バックグラウンド・ショートカット)からの
-//! 操作はすべてここを通り、povo への通信と安全装置はここで一元管理する。
+//! povoX のエンジン。povo への通信・安全装置・保存はすべてここで一元管理する。
 //!
 //! povo-web から引き継いだ約束ごと:
 //! - povo への通信は常に1本ずつ(呼び出し側の Mutex で直列化)。自動リトライはしない。
 //! - 403 や PIN 要求が返ったら、利用者がアプリで「再開」を押すまで povo への通信を止める
-//!   (この停止は保存され、バックグラウンド実行やショートカットからも越えられない)。
+//!   (この停止は保存され、バックグラウンド実行・ショートカット・通知からも越えられない)。
 //! - povo が待機時刻を返したら、その時刻まで送らない。
 //! - トークン更新は期限切れ後だけ。端末IDとトークンは必ず組で保存する。
 //! - OTP の再送は60秒に1回まで、入れ直しは3回まで。同じ商品の注文は120秒以内に繰り返せない。
 //! - 購入・コード送信は、送る「前」に記録する(応答が失敗でも povo 側で処理された可能性があるため)。
 //!
-//! 自動化のために足したもの:
-//! - 自動購入は「試運転」設定・月の上限金額・1日の回数・間隔・3DS 不要の商品だけ、をすべて満たすときだけ。
-//! - コードの自動適用は、手持ちのコード一覧から1件ずつ。送ったコードは二度と自動では送らない。
-//!   データ使い放題の有効期間中は送らない(公式アプリの注意書きと同じ)。
-//! - povo への通信は5分間に20回まで(スクリプトの書き間違いで連打しないため)。
+//! 自動化(ルールの実行)は plan.rs、ルールに渡す材料は rulectx.rs。
 
 use std::path::PathBuf;
 
 use povo_core::{ActionType, AuthChallenge};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::backend::{Backend, Failure, R};
-use crate::{parse, protocol, timeutil};
+use crate::model::*;
+use crate::state::PersistState;
+use crate::store::SessionStore;
+use crate::{catalog, history, jptime, parse, protocol};
 
 pub const ORDER_CONFIRM: &str = "購入する";
 pub const CODE_CONFIRM: &str = "利用する";
 const OTP_COOLDOWN_MS: i64 = 60_000;
 const MAX_OTP_ATTEMPTS: u32 = 3;
-const SAME_ORDER_COOLDOWN_MS: i64 = 120_000;
-const CODE_COOLDOWN_MS: i64 = 15_000;
+pub(crate) const SAME_ORDER_COOLDOWN_MS: i64 = 120_000;
+pub(crate) const CODE_COOLDOWN_MS: i64 = 15_000;
 const CODE_MAX_LEN: usize = 18;
 /// 通常の残量取得は30秒以内なら前回の結果を返す。強制更新でも5秒は空ける。
 const SNAPSHOT_MIN_GAP_MS: i64 = 30_000;
 const SNAPSHOT_FORCE_GAP_MS: i64 = 5_000;
-const CATALOG_MAX_AGE_MS: i64 = 6 * 3600 * 1000;
-/// コード適用前の「使い放題中か」の確認に使える残量の古さ。
-const UNLIMITED_CHECK_MAX_AGE_MS: i64 = 5 * 60 * 1000;
+pub(crate) const CATALOG_MAX_AGE_MS: i64 = 6 * 3600 * 1000;
 const RATE_WINDOW_MS: i64 = 5 * 60 * 1000;
 const RATE_MAX_CALLS: usize = 20;
-const LOG_MAX: usize = 300;
-const LEDGER_MAX: usize = 500;
-
-// ---- 保存する状態 -----------------------------------------------------------
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Stored {
-    pub device_id: String,
-    pub auth_token: String,
-    pub sin: Option<String>,
-    pub identifier: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Settings {
-    /// 試運転: 自動の購入・コード適用を「したことにして」実際には送らない。
-    pub dry_run: bool,
-    /// 自動購入の月の上限(円、日本時間の暦月)。手動購入は数えない。
-    pub monthly_cap_yen: u32,
-    /// 自動購入の1日の上限回数(日本時間)。
-    pub max_auto_orders_per_day: u32,
-    /// 自動購入どうしの最小間隔(分)。
-    pub auto_order_gap_min: u32,
-    /// スクリプトからのコード自動適用を許すか。
-    pub auto_codes: bool,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Settings { dry_run: true, monthly_cap_yen: 1000, max_auto_orders_per_day: 2, auto_order_gap_min: 30, auto_codes: true }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum CodeStatus {
-    /// 未使用。自動・手動で使える。
-    Pending,
-    /// 送信を始めたが結果を受け取れなかった(通信切れ・アプリ終了)。自動では送らない。
-    Sent,
-    Applied,
-    Rejected,
-    Error,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CodeEntry {
-    pub id: String,
-    pub code: String,
-    #[serde(default)]
-    pub tag: String,
-    #[serde(default)]
-    pub note: String,
-    pub status: CodeStatus,
-    pub added_ms: i64,
-    #[serde(default)]
-    pub sent_ms: Option<i64>,
-    #[serde(default)]
-    pub result: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LedgerEntry {
-    pub time_ms: i64,
-    pub sku: String,
-    pub name: Option<String>,
-    pub price_yen: Option<u32>,
-    pub auto: bool,
-    /// sent(送信中・結果不明) / ok / needs_3ds / error
-    pub status: String,
-    #[serde(default)]
-    pub message: Option<String>,
-    #[serde(default)]
-    pub challenge_url: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LogEntry {
-    pub time_ms: i64,
-    /// info / action / warn / error
-    pub level: String,
-    pub message: String,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-#[serde(default)]
-struct PersistState {
-    settings: Settings,
-    halted: Option<String>,
-    blocked_until_ms: Option<i64>,
-    codes: Vec<CodeEntry>,
-    ledger: Vec<LedgerEntry>,
-    last_code_sent_ms: Option<i64>,
-    last_otp_sent_ms: Option<i64>,
-    snapshot: Option<Value>,
-    snapshot_ms: i64,
-    catalog: Option<Value>,
-    catalog_ms: i64,
-    log: Vec<LogEntry>,
-    /// モックのときだけ、セッションもここに置く(本番はアプリがキーチェーンに置く)。
-    mock_session: Option<Stored>,
-}
+pub(crate) const GB: f64 = 1_048_576.0;
 
 struct LoginFlow {
     backend: Backend,
@@ -155,39 +48,28 @@ struct LoginFlow {
     failed_attempts: u32,
 }
 
-/// アプリに伝えるセッションの変化(本番のみ)。アプリはこれをキーチェーンに反映する。
-#[derive(Debug, Clone, PartialEq)]
-pub enum SessionEvent {
-    Save(Stored),
-    Clear,
-}
-
 pub struct Engine {
     path: PathBuf,
-    mock: bool,
-    st: PersistState,
-    session: Option<(Backend, Stored)>,
+    pub(crate) mock: bool,
+    scenario: String,
+    pub(crate) st: PersistState,
+    session: Option<(Backend, StoredSession)>,
     login: Option<LoginFlow>,
-    session_event: Option<SessionEvent>,
+    store: Box<dyn SessionStore>,
     calls: Vec<i64>,
     #[cfg(test)]
     pub clock: Option<i64>,
 }
 
-fn now_ms_real() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
-}
-
-fn local(msg: impl Into<String>) -> Failure {
+pub(crate) fn local(msg: impl Into<String>) -> Failure {
     Failure::local(msg)
 }
 
-fn arg_str(req: &Value, key: &str) -> Option<String> {
-    req.get(key).and_then(|v| v.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
-
-fn arg_bool(req: &Value, key: &str) -> bool {
-    req.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+pub(crate) fn new_id() -> String {
+    use rand::RngCore;
+    let mut b = [0u8; 6];
+    rand::rngs::OsRng.fill_bytes(&mut b);
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 fn action_label(a: &ActionType) -> &'static str {
@@ -195,6 +77,10 @@ fn action_label(a: &ActionType) -> &'static str {
         ActionType::EmailOtp => "メールに届いたコード",
         ActionType::LoginOtp | ActionType::RegisterOtp => "SMSに届いたコード",
     }
+}
+
+fn clean(v: Option<String>) -> Option<String> {
+    v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 /// 公式アプリの入力欄と同じ整え方(povo-web と同じ)。
@@ -212,37 +98,7 @@ pub fn normalize_code(raw: &str) -> Result<String, String> {
     Ok(code)
 }
 
-/// "2,700円" "¥330" "330" → 円。読めなければ None(その商品は自動購入しない)。
-pub fn price_yen(text: &str) -> Option<u32> {
-    let t = text.trim();
-    if t.contains("無料") {
-        return Some(0);
-    }
-    let digits_at = |s: &str| -> Option<u32> {
-        let d: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == ',').filter(|c| *c != ',').collect();
-        d.parse().ok()
-    };
-    if let Some(i) = t.find(['¥', '￥']) {
-        let rest = &t[i..];
-        let rest = rest.trim_start_matches(['¥', '￥']).trim_start();
-        if let Some(v) = digits_at(rest) {
-            return Some(v);
-        }
-    }
-    if let Some(i) = t.find('円') {
-        let before: String = t[..i].chars().rev().take_while(|c| c.is_ascii_digit() || *c == ',').collect();
-        let before: String = before.chars().rev().filter(|c| *c != ',').collect();
-        if let Ok(v) = before.parse() {
-            return Some(v);
-        }
-    }
-    if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit() || c == ',') {
-        return digits_at(t);
-    }
-    None
-}
-
-fn mask(code: &str) -> String {
+pub fn mask(code: &str) -> String {
     let n = code.chars().count();
     if n <= 4 {
         return "•".repeat(n);
@@ -252,165 +108,107 @@ fn mask(code: &str) -> String {
     format!("{head}{}{tail}", "•".repeat(n - 4))
 }
 
+pub(crate) fn yen(p: Option<u32>) -> String {
+    p.map(|p| format!(" {p}円")).unwrap_or_default()
+}
+
 impl Engine {
-    /// `dir` はアプリの Application Support など。モックと本番は別のファイルに分ける。
-    pub fn open(dir: &str, mock: bool, session: Option<Stored>) -> Engine {
-        let base = PathBuf::from(dir);
+    pub fn open(config: &EngineConfig, store: Box<dyn SessionStore>) -> Engine {
+        let base = PathBuf::from(&config.dir);
         let _ = std::fs::create_dir_all(&base);
-        let path = base.join(if mock { "state-mock.json" } else { "state.json" });
-        let st: PersistState = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let path = base.join(if config.mock { "state-mock.json" } else { "state.json" });
+        let (st, dropped) = PersistState::load(&path);
         let mut e = Engine {
             path,
-            mock,
+            mock: config.mock,
+            scenario: config.mock_scenario.clone(),
             st,
             session: None,
             login: None,
-            session_event: None,
+            store,
             calls: vec![],
             #[cfg(test)]
             clock: None,
         };
-        let restore = if mock { e.st.mock_session.clone() } else { session };
+        if !dropped.is_empty() {
+            e.log(LogLevel::Warn, format!("保存データの一部を読めなかったので初期値に戻しました: {}", dropped.join(", ")));
+        }
+        let restore = if e.mock { e.st.mock_session.clone() } else { e.store.load() };
         if let Some(s) = restore {
-            let b = Backend::new(mock, &s.device_id);
+            let b = Backend::with_scenario(e.mock, &s.device_id, &e.scenario);
             b.restore(&s.auth_token, s.sin.clone());
             e.session = Some((b, s));
         }
+        e.save();
         e
     }
 
-    fn now(&self) -> i64 {
+    pub(crate) fn now(&self) -> i64 {
         #[cfg(test)]
         if let Some(c) = self.clock {
             return c;
         }
-        now_ms_real()
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
     }
 
-    pub fn take_session_event(&mut self) -> Option<SessionEvent> {
-        self.session_event.take()
+    pub(crate) fn save(&mut self) {
+        let path = self.path.clone();
+        self.st.save(&path);
     }
 
-    fn save(&mut self) {
-        if self.st.log.len() > LOG_MAX {
-            let cut = self.st.log.len() - LOG_MAX;
-            self.st.log.drain(..cut);
-        }
-        if self.st.ledger.len() > LEDGER_MAX {
-            let cut = self.st.ledger.len() - LEDGER_MAX;
-            self.st.ledger.drain(..cut);
-        }
-        let Ok(bytes) = serde_json::to_vec(&self.st) else { return };
-        let tmp = self.path.with_extension("tmp");
-        if std::fs::write(&tmp, bytes).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.path);
-        }
-    }
-
-    fn log(&mut self, level: &str, message: impl Into<String>) {
+    pub(crate) fn log(&mut self, level: LogLevel, message: impl Into<String>) {
         let time_ms = self.now();
-        self.st.log.push(LogEntry { time_ms, level: level.into(), message: message.into() });
+        self.st.log.push(LogEntry { time_ms, level, message: message.into() });
     }
 
     fn session_changed(&mut self) {
         let Some((_, s)) = &self.session else { return };
+        let s = s.clone();
         if self.mock {
-            self.st.mock_session = Some(s.clone());
+            self.st.mock_session = Some(s);
         } else {
-            self.session_event = Some(SessionEvent::Save(s.clone()));
+            self.store.save(s);
         }
     }
 
-    // ---- 入口 ----------------------------------------------------------------
-
-    pub fn handle(&mut self, op: &str, req: &Value) -> R<Value> {
-        let out = match op {
-            "status" => Ok(self.status()),
-            "login_start" => self.login_start(req),
-            "login_resend" => self.login_resend(),
-            "login_otp" => self.login_otp(req),
-            "login_cancel" => {
-                self.login = None;
-                Ok(json!({"ok": true}))
-            }
-            "logout" => Ok(self.logout()),
-            "unhalt" => {
-                self.st.halted = None;
-                self.st.blocked_until_ms = None;
-                self.log("info", "通信を再開しました");
-                Ok(json!({"ok": true}))
-            }
-            "snapshot" => self.snapshot(arg_bool(req, "force")),
-            "cached_snapshot" => Ok(self.st.snapshot.clone().unwrap_or(Value::Null)),
-            "catalog" => self.catalog(arg_bool(req, "force")),
-            "history" => self.history(),
-            "order" => self.order(req),
-            "codes" => Ok(self.codes_json()),
-            "codes_add" => self.codes_add(req),
-            "code_remove" => self.code_edit(req, "remove"),
-            "code_reset" => self.code_edit(req, "reset"),
-            "code_update" => self.code_edit(req, "update"),
-            "apply_code" => self.apply_code(req),
-            "settings" => Ok(json!(self.st.settings)),
-            "settings_set" => self.settings_set(req),
-            "budget" => Ok(self.budget()),
-            "ledger" => Ok(json!(self.st.ledger.iter().rev().take(100).collect::<Vec<_>>())),
-            "log" => {
-                let level = arg_str(req, "level").unwrap_or_else(|| "info".into());
-                let level = if ["info", "action", "warn", "error"].contains(&level.as_str()) { level } else { "info".into() };
-                let msg: String = arg_str(req, "message").unwrap_or_default().chars().take(500).collect();
-                self.log(&level, msg);
-                Ok(json!({"ok": true}))
-            }
-            "logs" => {
-                let limit = req.get("limit").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
-                Ok(json!(self.st.log.iter().rev().take(limit).collect::<Vec<_>>()))
-            }
-            "logs_clear" => {
-                self.st.log.clear();
-                Ok(json!({"ok": true}))
-            }
-            other => Err(local(format!("不明な操作: {other}"))),
-        };
-        self.save();
-        out
+    pub fn logged_in(&self) -> bool {
+        self.session.is_some()
     }
 
-    fn status(&self) -> Value {
+    // ---- 状態 --------------------------------------------------------------------
+
+    pub fn status(&self) -> EngineStatus {
         let now = self.now();
-        let login = self.login.as_ref().map(|l| {
-            json!({
-                "identifier": l.email.clone().or(l.phone.clone()),
-                "current": l.pending.first().map(action_label),
-                "remaining": l.pending.len(),
-            })
+        let login = self.login.as_ref().map(|l| LoginState {
+            identifier: l.email.clone().or(l.phone.clone()),
+            current: l.pending.first().map(|a| action_label(a).to_string()),
+            remaining: l.pending.len() as u32,
         });
         let otp_cooldown_s = self
             .st
             .last_otp_sent_ms
             .map(|t| (OTP_COOLDOWN_MS - (now - t)) / 1000)
-            .filter(|s| *s > 0);
-        json!({
-            "mock": self.mock,
-            "logged_in": self.session.is_some(),
-            "identifier": self.session.as_ref().map(|(_, s)| s.identifier.clone()),
-            "halted": self.st.halted,
-            "blocked_until_ms": self.st.blocked_until_ms.filter(|t| *t > now),
-            "login": login,
-            "otp_cooldown_s": otp_cooldown_s,
-            "settings": self.st.settings,
-            "budget": self.budget(),
-            "codes_pending": self.st.codes.iter().filter(|c| c.status == CodeStatus::Pending).count(),
-            "snapshot_ms": if self.st.snapshot.is_some() { json!(self.st.snapshot_ms) } else { Value::Null },
-        })
+            .filter(|s| *s > 0)
+            .map(|s| s as u32);
+        EngineStatus {
+            mock: self.mock,
+            logged_in: self.session.is_some(),
+            identifier: self.session.as_ref().map(|(_, s)| s.identifier.clone()),
+            halted: self.st.halted.clone(),
+            blocked_until_ms: self.st.blocked_until_ms.filter(|t| *t > now),
+            login,
+            otp_cooldown_s,
+            settings: self.st.settings.clone(),
+            budget: self.budget(),
+            codes_pending: self.st.codes.iter().filter(|c| c.status == CodeStatus::Pending).count() as u32,
+            pending_actions: self.st.pending.iter().filter(|p| p.expires_ms > now).count() as u32,
+            snapshot_ms: self.st.snapshot.as_ref().map(|s| s.fetched_ms),
+        }
     }
 
-    // ---- 安全装置 --------------------------------------------------------------
+    // ---- 安全装置 ------------------------------------------------------------------
 
-    fn gate(&self) -> R<()> {
+    pub(crate) fn gate(&self) -> R<()> {
         if let Some(reason) = &self.st.halted {
             return Err(Failure {
                 hint: Some("原因を確認してから、アプリの「通信を再開」を押してください。".into()),
@@ -426,13 +224,13 @@ impl Engine {
         Ok(())
     }
 
-    fn note(&mut self, f: &Failure) {
+    pub(crate) fn note(&mut self, f: &Failure) {
         if f.halt {
             let reason = match f.povo_status {
                 Some(s) => format!("HTTP {s} {}", f.message),
                 None => f.message.clone(),
             };
-            self.log("error", format!("通信を停止: {reason}"));
+            self.log(LogLevel::Error, format!("通信を停止しました: {reason}"));
             self.st.halted = Some(reason);
         }
         if let Some(until) = f.block_until_ms {
@@ -449,7 +247,7 @@ impl Engine {
         self.calls.retain(|t| now - *t < RATE_WINDOW_MS);
         if self.calls.len() >= RATE_MAX_CALLS {
             return Err(local(format!(
-                "povo への通信が5分間に{RATE_MAX_CALLS}回を超えそうなので止めました。スクリプトが繰り返し呼んでいないか確認してください。"
+                "povo への通信が5分間に{RATE_MAX_CALLS}回を超えそうなので止めました。少し待ってからにしてください。"
             )));
         }
         self.calls.push(now);
@@ -457,7 +255,7 @@ impl Engine {
     }
 
     /// ログイン済みセッションで povo を1回呼ぶ。期限切れなら先にトークンを1回だけ更新して保存する。
-    fn povo<T>(&mut self, op: impl FnOnce(&Backend) -> R<T>) -> R<T> {
+    pub(crate) fn povo<T>(&mut self, op: impl FnOnce(&Backend) -> R<T>) -> R<T> {
         self.gate()?;
         let b = self.backend()?;
         if b.token().map(|t| protocol::is_expired(&t)).unwrap_or(true) {
@@ -484,6 +282,12 @@ impl Engine {
         r
     }
 
+    pub fn unhalt(&mut self) {
+        self.st.halted = None;
+        self.st.blocked_until_ms = None;
+        self.log(LogLevel::Info, "通信を再開しました");
+    }
+
     // ---- ログイン ----------------------------------------------------------------
 
     fn otp_wait(&self) -> R<()> {
@@ -496,20 +300,20 @@ impl Engine {
         Ok(())
     }
 
-    fn login_start(&mut self, req: &Value) -> R<Value> {
+    pub fn login_start(&mut self, email: Option<String>, phone: Option<String>) -> R<LoginStep> {
         self.gate()?;
         if self.session.is_some() {
             return Err(local("既にログインしています。別の回線にするには先にログアウトしてください。"));
         }
         self.otp_wait()?;
-        let email = arg_str(req, "email");
-        let phone = arg_str(req, "phone").map(|p| p.replace(['-', ' '], ""));
+        let email = clean(email);
+        let phone = clean(phone).map(|p| p.replace(['-', ' '], ""));
         if email.is_none() && phone.is_none() {
             return Err(local("メールアドレスか電話番号を入力してください。"));
         }
         // 端末IDはこのアカウント用に1回だけ作り、以後ずっと使う。
         let device_id = protocol::new_device_id();
-        let backend = Backend::new(self.mock, &device_id);
+        let backend = Backend::with_scenario(self.mock, &device_id, &self.scenario);
         let result = (|| {
             let actions = backend.login_actions(email.clone(), phone.clone())?;
             let auth_id = backend.send_otp(actions[0], email.as_deref(), phone.as_deref())?;
@@ -523,22 +327,23 @@ impl Engine {
             }
         };
         self.st.last_otp_sent_ms = Some(self.now());
-        let current = action_label(&actions[0]);
+        let current = action_label(&actions[0]).to_string();
         self.login = Some(LoginFlow { backend, device_id, email, phone, pending: actions, auth_id: Some(auth_id), challenges: vec![], failed_attempts: 0 });
-        Ok(json!({ "sent": current }))
+        Ok(LoginStep { done: false, sent: Some(current) })
     }
 
-    fn login_resend(&mut self) -> R<Value> {
+    pub fn login_resend(&mut self) -> R<LoginStep> {
         self.gate()?;
         self.otp_wait()?;
         let flow = self.login.as_ref().ok_or_else(|| local("ログイン手続き中ではありません。"))?;
         let action = *flow.pending.first().ok_or_else(|| local("送るコードがありません。"))?;
-        let r = flow.backend.send_otp(action, flow.email.as_deref(), flow.phone.as_deref());
-        match r {
+        match flow.backend.send_otp(action, flow.email.as_deref(), flow.phone.as_deref()) {
             Ok(auth_id) => {
                 self.st.last_otp_sent_ms = Some(self.now());
-                self.login.as_mut().unwrap().auth_id = Some(auth_id);
-                Ok(json!({ "sent": action_label(&action) }))
+                if let Some(f) = self.login.as_mut() {
+                    f.auth_id = Some(auth_id);
+                }
+                Ok(LoginStep { done: false, sent: Some(action_label(&action).into()) })
             }
             Err(f) => {
                 self.note(&f);
@@ -547,9 +352,9 @@ impl Engine {
         }
     }
 
-    fn login_otp(&mut self, req: &Value) -> R<Value> {
+    pub fn login_otp(&mut self, code: &str) -> R<LoginStep> {
         self.gate()?;
-        let code: String = arg_str(req, "code").unwrap_or_default().chars().filter(|c| c.is_ascii_digit()).collect();
+        let code: String = code.chars().filter(|c| c.is_ascii_digit()).collect();
         if code.is_empty() {
             return Err(local("コードを入力してください。"));
         }
@@ -560,15 +365,15 @@ impl Engine {
 
         // 次の認証ステップがあれば、このコードを積んで次のコードを送る(povo-android と同じ)。
         if let Some(next) = flow.pending.get(1).copied() {
-            let r = flow.backend.send_otp(next, flow.email.as_deref(), flow.phone.as_deref());
-            return match r {
+            return match flow.backend.send_otp(next, flow.email.as_deref(), flow.phone.as_deref()) {
                 Ok(id) => {
                     self.st.last_otp_sent_ms = Some(self.now());
-                    let flow = self.login.as_mut().unwrap();
-                    flow.challenges.push(this);
-                    flow.pending.remove(0);
-                    flow.auth_id = Some(id);
-                    Ok(json!({ "done": false, "sent": action_label(&next) }))
+                    if let Some(flow) = self.login.as_mut() {
+                        flow.challenges.push(this);
+                        flow.pending.remove(0);
+                        flow.auth_id = Some(id);
+                    }
+                    Ok(LoginStep { done: false, sent: Some(action_label(&next).into()) })
                 }
                 Err(f) => {
                     self.note(&f);
@@ -589,8 +394,8 @@ impl Engine {
         });
         match result {
             Ok((token, sin)) => {
-                let flow = self.login.take().unwrap();
-                let stored = Stored {
+                let Some(flow) = self.login.take() else { return Err(local("ログイン手続きが見つかりません。")) };
+                let stored = StoredSession {
                     device_id: flow.device_id,
                     auth_token: token,
                     sin,
@@ -598,20 +403,22 @@ impl Engine {
                 };
                 self.session = Some((flow.backend, stored));
                 self.session_changed();
-                self.log("info", "ログインしました");
-                Ok(json!({ "done": true }))
+                self.log(LogLevel::Info, "ログインしました");
+                Ok(LoginStep { done: true, sent: None })
             }
             Err(mut f) => {
                 self.note(&f);
-                let flow = self.login.as_mut().unwrap();
-                flow.failed_attempts += 1;
-                if flow.failed_attempts >= MAX_OTP_ATTEMPTS {
+                let attempts = self.login.as_mut().map(|fl| {
+                    fl.failed_attempts += 1;
+                    fl.failed_attempts
+                });
+                if attempts.unwrap_or(MAX_OTP_ATTEMPTS) >= MAX_OTP_ATTEMPTS {
                     self.login = None;
                     f.hint = Some("3回失敗したので手続きを中止しました。時間をおいて、最初からやり直してください。".into());
                 } else {
                     f.hint = Some(format!(
                         "コードを確認してもう一度入力できます(あと{}回)。{}",
-                        MAX_OTP_ATTEMPTS - flow.failed_attempts,
+                        MAX_OTP_ATTEMPTS - attempts.unwrap_or(0),
                         f.hint.clone().unwrap_or_default()
                     ));
                 }
@@ -620,43 +427,44 @@ impl Engine {
         }
     }
 
+    pub fn login_cancel(&mut self) {
+        self.login = None;
+    }
+
     /// この端末からセッションを消すだけ。povo 側には何も送らない。
-    fn logout(&mut self) -> Value {
+    pub fn logout(&mut self) {
         self.session = None;
         self.login = None;
         self.st.snapshot = None;
-        self.st.snapshot_ms = 0;
         self.st.catalog = None;
-        self.st.catalog_ms = 0;
+        self.st.pending.clear();
         if self.mock {
             self.st.mock_session = None;
+            self.st.history.clear();
         } else {
-            self.session_event = Some(SessionEvent::Clear);
+            self.store.clear();
         }
-        self.log("info", "ログアウトしました");
-        json!({"ok": true})
+        self.log(LogLevel::Info, "ログアウトしました");
     }
 
     // ---- 残量 ----------------------------------------------------------------------
 
-    fn snapshot(&mut self, force: bool) -> R<Value> {
-        let age = self.now() - self.st.snapshot_ms;
+    pub fn snapshot(&mut self, force: bool) -> R<Snapshot> {
         let gap = if force { SNAPSHOT_FORCE_GAP_MS } else { SNAPSHOT_MIN_GAP_MS };
         if let Some(s) = &self.st.snapshot {
-            if age < gap && self.session.is_some() {
+            if self.now() - s.fetched_ms < gap && self.session.is_some() {
                 let mut s = s.clone();
-                s["cached"] = json!(true);
+                s.cached = true;
                 return Ok(s);
             }
         }
         self.fetch_snapshot()
     }
 
-    fn fetch_snapshot(&mut self) -> R<Value> {
-        let mut profile = Value::Null;
+    pub(crate) fn fetch_snapshot(&mut self) -> R<Snapshot> {
         // 回線番号(SIN)がまだ無いときだけ profile を呼ぶ(povo-android と同じく SIN はここで決まる)。
         if self.session.as_ref().is_some_and(|(_, s)| s.sin.is_none()) {
-            profile = self.povo(|b| b.profile())?;
+            self.povo(|b| b.profile())?;
             let sin = self.backend()?.sin();
             if sin.is_some() {
                 if let Some((_, s)) = self.session.as_mut() {
@@ -672,222 +480,227 @@ impl Engine {
             Err(f) if f.halt || f.block_until_ms.is_some() => return Err(f),
             Err(f) => (None, Some(f.message)),
         };
-        let snap = derive_snapshot(self.now(), usage, toppings, toppings_error, profile);
+        let now = self.now();
+        let snap = build_snapshot(now, usage.as_ref(), toppings.as_ref(), toppings_error);
+        if let Some(left) = snap.left_kb {
+            if self.mock {
+                history::seed_mock(&mut self.st.history, now, left);
+            }
+            history::record(&mut self.st.history, UsageSample { t_ms: now, left_kb: left, unlimited: snap.unlimited.active == Some(true) });
+        }
         self.st.snapshot = Some(snap.clone());
-        self.st.snapshot_ms = self.now();
         Ok(snap)
     }
 
-    /// コード適用前の確認用に、十分新しい残量を用意する。
-    fn recent_snapshot(&mut self, max_age: i64) -> R<Value> {
+    /// 十分新しい残量を用意する(コード適用前の「使い放題中か」の確認用)。
+    pub(crate) fn recent_snapshot(&mut self, max_age_ms: i64) -> R<Snapshot> {
         match &self.st.snapshot {
-            Some(s) if self.now() - self.st.snapshot_ms <= max_age => Ok(s.clone()),
+            Some(s) if self.now() - s.fetched_ms <= max_age_ms => Ok(s.clone()),
             _ => self.fetch_snapshot(),
         }
     }
 
-    fn history(&mut self) -> R<Value> {
-        let raw = self.povo(|b| b.quilt("order-history"))?;
-        parse::purchases(&raw).ok_or_else(|| local("購入履歴の形を読めませんでした。"))
+    pub fn cached_snapshot(&self) -> Option<Snapshot> {
+        self.st.snapshot.clone()
     }
 
-    // ---- カタログと購入 ------------------------------------------------------------
+    pub fn history(&self, hours: u32) -> Vec<UsageSample> {
+        let since = self.now() - hours as i64 * 3_600_000;
+        self.st.history.iter().filter(|s| s.t_ms >= since).cloned().collect()
+    }
 
-    fn catalog(&mut self, force: bool) -> R<Value> {
+    pub fn insights(&self) -> UsageInsights {
+        history::insights(&self.st.history, self.now())
+    }
+
+    pub fn purchase_history(&mut self) -> R<Vec<Purchase>> {
+        let raw = self.povo(|b| b.quilt("order-history"))?;
+        let v = parse::purchases(&raw).ok_or_else(|| local("購入履歴の形を読めませんでした。"))?;
+        Ok(v.as_array()
+            .into_iter()
+            .flatten()
+            .map(|p| Purchase {
+                order_id: p["order_id"].as_str().map(String::from),
+                status: p["status"].as_str().map(String::from),
+                date: p["date"].as_str().map(String::from),
+                date_iso: p["date_iso"].as_str().map(String::from),
+                items: p["products"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|i| PurchaseItem { name: i["name"].as_str().map(String::from), price: i["price"].as_str().map(String::from) })
+                    .collect(),
+            })
+            .collect())
+    }
+
+    // ---- 次の自動チェック ------------------------------------------------------------
+
+    /// 次の自動チェックまでの目安(分)。残量の減り方・使い放題の終わり・残りの少なさで縮める。
+    pub fn next_check_delay_min(&self) -> u32 {
+        let s = &self.st.settings;
+        let min = s.check_min_interval_min.max(15) as f64;
+        let max = (s.check_max_interval_min as f64).max(min);
+        let mut d = max;
+        let now = self.now();
+        if let Some(snap) = &self.st.snapshot {
+            if snap.unlimited.active == Some(true) {
+                if let Some(u) = snap.unlimited.until_ms {
+                    d = d.min((u - now) as f64 / 60_000.0 + 2.0);
+                }
+            } else {
+                if let Some(h) = self.insights().hours_left {
+                    d = d.min(h * 60.0 / 4.0);
+                }
+                if snap.left_kb.is_some_and(|l| l < GB) {
+                    d = d.min(30.0);
+                }
+            }
+        }
+        d.clamp(min, max).round() as u32
+    }
+
+    // ---- カタログと手動購入 ------------------------------------------------------------
+
+    pub fn catalog(&mut self, force: bool) -> R<Catalog> {
         if !force {
             if let Some(c) = &self.st.catalog {
-                if self.now() - self.st.catalog_ms < CATALOG_MAX_AGE_MS {
+                if self.now() - c.fetched_ms < CATALOG_MAX_AGE_MS {
                     return Ok(c.clone());
                 }
             }
         }
         let raw = self.povo(|b| b.quilt("dashboard-v2"))?;
         let sections = parse::catalog(&raw)
-            .ok_or_else(|| local("カタログの形を読めませんでした(povo 側の変更の可能性)。購入は行わないでください。"))?;
-        let mut products = Vec::new();
-        for sec in sections.as_array().into_iter().flatten() {
-            let title = sec.get("title").cloned().unwrap_or(Value::Null);
-            for p in sec.get("products").and_then(|v| v.as_array()).into_iter().flatten() {
-                let mut p = p.clone();
-                let yen = p.get("price").and_then(|v| v.as_str()).and_then(price_yen);
-                p["price_yen"] = json!(yen);
-                p["section"] = title.clone();
-                products.push(p);
-            }
-        }
-        let doc = json!({ "fetched_ms": self.now(), "sections": sections, "products": products });
-        self.st.catalog = Some(doc.clone());
-        self.st.catalog_ms = self.now();
-        Ok(doc)
+            .ok_or_else(|| local("トッピング一覧の形を読めませんでした(povo 側の変更の可能性)。購入は行わないでください。"))?;
+        let c = Catalog { fetched_ms: self.now(), products: catalog::products(&sections) };
+        self.st.catalog = Some(c.clone());
+        Ok(c)
     }
 
-    fn find_product(&self, sku: &str) -> Option<Value> {
-        self.st
-            .catalog
-            .as_ref()?
-            .get("products")?
-            .as_array()?
-            .iter()
-            .find(|p| p.get("sku").and_then(|v| v.as_str()) == Some(sku))
-            .cloned()
+    pub fn cached_catalog(&self) -> Option<Catalog> {
+        self.st.catalog.clone()
     }
 
-    fn month_key(&self, ms: i64) -> (i64, u32) {
-        let (y, m, _) = timeutil::jst_ymd(ms);
-        (y, m)
+    pub(crate) fn find_product(&self, sku: &str) -> Option<Product> {
+        self.st.catalog.as_ref()?.products.iter().find(|p| p.sku == sku).cloned()
     }
 
-    fn budget(&self) -> Value {
+    /// 新しいカタログに載っている商品を探す(古ければ取り直す)。
+    pub(crate) fn fresh_product(&mut self, sku: &str) -> R<Option<Product>> {
         let now = self.now();
-        let this_month = self.month_key(now);
-        let today = timeutil::jst_ymd(now);
-        let in_month = |e: &&LedgerEntry| self.month_key(e.time_ms) == this_month;
-        let auto_month: u32 = self.st.ledger.iter().filter(|e| e.auto).filter(in_month).filter_map(|e| e.price_yen).sum();
-        let all_month: u32 = self.st.ledger.iter().filter(in_month).filter_map(|e| e.price_yen).sum();
-        let auto_today = self.st.ledger.iter().filter(|e| e.auto && timeutil::jst_ymd(e.time_ms) == today).count();
+        let stale = self.st.catalog.as_ref().map(|c| now - c.fetched_ms >= CATALOG_MAX_AGE_MS).unwrap_or(true);
+        if stale || self.find_product(sku).is_none() {
+            self.catalog(true)?;
+        }
+        Ok(self.find_product(sku))
+    }
+
+    pub fn budget(&self) -> Budget {
+        let now = self.now();
+        let (y, m, _) = jptime::jst_ymd(now);
+        let today = jptime::jst_ymd(now);
+        let in_month = |e: &&LedgerEntry| {
+            let (ey, em, _) = jptime::jst_ymd(e.time_ms);
+            ey == y && em == m
+        };
+        let rule = |e: &&LedgerEntry| e.source == OrderSource::Rule;
+        let rule_spent: u32 = self.st.ledger.iter().filter(rule).filter(in_month).filter_map(|e| e.price_yen).sum();
+        let all_spent: u32 = self.st.ledger.iter().filter(in_month).filter_map(|e| e.price_yen).sum();
+        let today_count = self.st.ledger.iter().filter(rule).filter(|e| jptime::jst_ymd(e.time_ms) == today).count() as u32;
         let cap = self.st.settings.monthly_cap_yen;
-        json!({
-            "cap_yen": cap,
-            "auto_spent_yen": auto_month,
-            "all_spent_yen": all_month,
-            "remaining_yen": cap.saturating_sub(auto_month),
-            "auto_today": auto_today,
-            "max_auto_per_day": self.st.settings.max_auto_orders_per_day,
-        })
+        Budget {
+            cap_yen: cap,
+            rule_spent_yen: rule_spent,
+            all_spent_yen: all_spent,
+            remaining_yen: cap.saturating_sub(rule_spent),
+            rule_orders_today: today_count,
+            max_per_day: self.st.settings.max_rule_orders_per_day,
+        }
     }
 
-    fn order(&mut self, req: &Value) -> R<Value> {
-        let sku = arg_str(req, "sku").ok_or_else(|| local("商品IDがありません。"))?;
-        if sku.len() > 200 {
-            return Err(local("商品IDが不正です。"));
-        }
-        let auto = arg_bool(req, "auto");
-        if !auto && arg_str(req, "confirm").as_deref() != Some(ORDER_CONFIRM) {
-            return Err(local(format!("確認欄に「{ORDER_CONFIRM}」と入力してください。")));
-        }
-        self.gate()?;
-        self.backend()?;
+    pub(crate) fn recently_ordered(&self, sku: &str) -> bool {
         let now = self.now();
-        if self.st.ledger.iter().any(|e| e.sku == sku && now - e.time_ms < SAME_ORDER_COOLDOWN_MS) {
-            return Err(local("同じ商品を続けて注文しようとしています。二重購入防止のため2分待ち、購入履歴を確認してください。"));
-        }
+        self.st.ledger.iter().any(|e| e.sku == sku && now - e.time_ms < SAME_ORDER_COOLDOWN_MS)
+    }
 
-        let mut product = self.find_product(&sku);
-        if auto {
-            // 自動購入は、新しいカタログに載っている商品だけ。
-            if product.is_none() || now - self.st.catalog_ms >= CATALOG_MAX_AGE_MS {
-                self.catalog(true)?;
-                product = self.find_product(&sku);
-            }
-            let p = product.clone().ok_or_else(|| local(format!("自動購入: 商品 {sku} が購入できる一覧にありません。")))?;
-            let name = p.get("name").and_then(|v| v.as_str()).unwrap_or(&sku).to_string();
-            if p.get("requires_3ds").and_then(|v| v.as_bool()).unwrap_or(false) {
-                let msg = format!("自動購入しません: {name} は3Dセキュアが必要です。アプリから手動で購入してください。");
-                self.log("warn", &msg);
-                return Err(local(msg));
-            }
-            let price = p.get("price_yen").and_then(|v| v.as_u64()).map(|v| v as u32).ok_or_else(|| {
-                local(format!("自動購入しません: {name} の価格を読めませんでした。"))
-            })?;
-            let b = self.budget();
-            let spent = b["auto_spent_yen"].as_u64().unwrap_or(0) as u32;
-            let cap = self.st.settings.monthly_cap_yen;
-            if spent + price > cap {
-                let msg = format!("自動購入しません: 今月の上限 {cap}円を超えます(使用済み {spent}円 + {name} {price}円)。");
-                self.log("warn", &msg);
-                return Err(local(msg));
-            }
-            let today = b["auto_today"].as_u64().unwrap_or(0) as u32;
-            if today >= self.st.settings.max_auto_orders_per_day {
-                let msg = format!("自動購入しません: 今日はすでに{today}回自動購入しています(上限 {}回)。", self.st.settings.max_auto_orders_per_day);
-                self.log("warn", &msg);
-                return Err(local(msg));
-            }
-            let gap_ms = self.st.settings.auto_order_gap_min as i64 * 60_000;
-            if let Some(last) = self.st.ledger.iter().filter(|e| e.auto).map(|e| e.time_ms).max() {
-                if now - last < gap_ms {
-                    let msg = format!("自動購入しません: 前回の自動購入から{}分経っていません。", self.st.settings.auto_order_gap_min);
-                    self.log("warn", &msg);
-                    return Err(local(msg));
-                }
-            }
-            if self.st.settings.dry_run || arg_bool(req, "dry_run") {
-                self.log("action", format!("(試運転){name} {price}円 を購入するところでした"));
-                return Ok(json!({ "dry_run": true, "product": p, "needs_3ds": false }));
-            }
-        }
-
-        let name = product.as_ref().and_then(|p| p.get("name")).and_then(|v| v.as_str()).map(String::from);
-        let price = product.as_ref().and_then(|p| p.get("price_yen")).and_then(|v| v.as_u64()).map(|v| v as u32);
-        // 送信前に記録・保存する。
+    /// 注文を送る(手動・ルール共通)。送る前に記録・保存する。
+    pub(crate) fn send_order(&mut self, sku: &str, product: Option<&Product>, source: OrderSource) -> R<OrderResult> {
+        let now = self.now();
+        let name = product.map(|p| p.name.clone());
+        let price = product.and_then(|p| p.price_yen);
         self.st.ledger.push(LedgerEntry {
             time_ms: now,
-            sku: sku.clone(),
+            sku: sku.to_string(),
             name: name.clone(),
             price_yen: price,
-            auto,
-            status: "sent".into(),
+            source,
+            status: LedgerStatus::Sent,
             message: None,
             challenge_url: None,
         });
         let idx = self.st.ledger.len() - 1;
         self.save();
-        let label = name.clone().unwrap_or_else(|| sku.clone());
-        let who = if auto { "自動購入" } else { "購入" };
-        let s = sku.clone();
+        let label = name.unwrap_or_else(|| sku.to_string());
+        let who = if source == OrderSource::Rule { "ルールで購入" } else { "購入" };
+        let s = sku.to_string();
         match self.povo(move |b| b.place_order(&s)) {
             Ok(raw) => {
                 let parsed = parse::order(&raw).unwrap_or(Value::Null);
                 let challenge = parsed.get("challenge_url").and_then(|v| v.as_str()).map(String::from);
+                let order_ref = parsed.get("order_ref").and_then(|v| v.as_str()).map(String::from);
                 let e = &mut self.st.ledger[idx];
                 if let Some(url) = &challenge {
-                    e.status = "needs_3ds".into();
+                    e.status = LedgerStatus::Needs3ds;
                     e.challenge_url = Some(url.clone());
-                    self.log("warn", format!("{who}: {label} は3Dセキュアの認証待ちです(まだ課金されていません)"));
+                    self.log(LogLevel::Warn, format!("{who}: {label} は3Dセキュアの認証待ちです(まだ課金されていません)"));
                 } else {
-                    e.status = "ok".into();
-                    self.log("action", format!("{who}: {label}{} を注文しました", price.map(|p| format!(" {p}円")).unwrap_or_default()));
+                    e.status = LedgerStatus::Ok;
+                    self.log(LogLevel::Action, format!("{who}: {label}{} を注文しました", yen(price)));
                 }
-                self.st.snapshot_ms = 0;
-                Ok(json!({ "dry_run": false, "order": parsed, "needs_3ds": challenge.is_some(), "challenge_url": challenge, "product": product }))
+                // 次の残量取得で反映を確かめる
+                if let Some(s) = self.st.snapshot.as_mut() {
+                    s.fetched_ms = 0;
+                }
+                Ok(OrderResult { needs_3ds: challenge.is_some(), challenge_url: challenge, order_ref })
             }
             Err(f) => {
                 let e = &mut self.st.ledger[idx];
-                e.status = "error".into();
+                e.status = LedgerStatus::Error;
                 e.message = Some(f.message.clone());
-                self.log("error", format!("{who}失敗: {label}: {}(課金された可能性があるので購入履歴を確認してください)", f.message));
+                self.log(LogLevel::Error, format!("{who}に失敗: {label}: {}(課金された可能性があるので購入履歴を確認してください)", f.message));
                 Err(f)
             }
         }
     }
 
-    // ---- コード ---------------------------------------------------------------------
-
-    fn codes_json(&self) -> Value {
-        let list: Vec<Value> = self
-            .st
-            .codes
-            .iter()
-            .map(|c| {
-                let mut v = json!(c);
-                v["masked"] = json!(mask(&c.code));
-                v
-            })
-            .collect();
-        json!(list)
+    /// ショップからの手動購入。確認語が要る。
+    pub fn order_manual(&mut self, sku: &str, confirm: &str) -> R<OrderResult> {
+        let sku = sku.trim();
+        if sku.is_empty() || sku.len() > 200 {
+            return Err(local("商品IDが不正です。"));
+        }
+        if confirm.trim() != ORDER_CONFIRM {
+            return Err(local(format!("確認欄に「{ORDER_CONFIRM}」と入力してください。")));
+        }
+        self.gate()?;
+        self.backend()?;
+        if self.recently_ordered(sku) {
+            return Err(local("同じ商品を続けて注文しようとしています。二重購入防止のため2分待ち、購入履歴を確認してください。"));
+        }
+        let product = self.find_product(sku);
+        self.send_order(sku, product.as_ref(), OrderSource::Manual)
     }
 
-    fn new_code_id(&self) -> String {
-        use rand::RngCore;
-        let mut b = [0u8; 6];
-        rand::rngs::OsRng.fill_bytes(&mut b);
-        b.iter().map(|x| format!("{x:02x}")).collect()
+    // ---- コード ---------------------------------------------------------------------
+
+    pub fn codes(&self) -> Vec<CodeEntry> {
+        self.st.codes.iter().map(|c| CodeEntry { masked: mask(&c.code), ..c.clone() }).collect()
     }
 
     /// 1行に1コード。「コード タグ メモ…」(空白・カンマ・タブ区切り)。
-    fn codes_add(&mut self, req: &Value) -> R<Value> {
-        let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        let default_tag = arg_str(req, "tag").unwrap_or_default();
+    pub fn add_codes(&mut self, text: &str, default_tag: Option<String>) -> AddCodesResult {
+        let default_tag = clean(default_tag).unwrap_or_default();
         let mut added = 0;
         let mut duplicates = Vec::new();
         let mut invalid = Vec::new();
@@ -911,142 +724,61 @@ impl Engine {
             }
             let tag = parts.next().map(|t| t.to_string()).unwrap_or_else(|| default_tag.clone());
             let note = parts.collect::<Vec<_>>().join(" ");
-            let entry = CodeEntry {
-                id: self.new_code_id(),
+            let now = self.now();
+            self.st.codes.push(CodeEntry {
+                id: new_id(),
+                masked: mask(&code),
                 code,
                 tag,
                 note,
                 status: CodeStatus::Pending,
-                added_ms: self.now(),
+                added_ms: now,
                 sent_ms: None,
                 result: None,
-            };
-            self.st.codes.push(entry);
+            });
             added += 1;
         }
         if added > 0 {
-            self.log("info", format!("コードを{added}件追加しました"));
+            self.log(LogLevel::Info, format!("コードを{added}件登録しました"));
         }
-        Ok(json!({ "added": added, "duplicates": duplicates, "invalid": invalid }))
+        AddCodesResult { added, duplicates, invalid }
     }
 
-    fn code_edit(&mut self, req: &Value, what: &str) -> R<Value> {
-        let id = arg_str(req, "id").ok_or_else(|| local("id がありません。"))?;
-        let i = self.st.codes.iter().position(|c| c.id == id).ok_or_else(|| local("そのコードは見つかりません。"))?;
-        match what {
-            "remove" => {
-                self.st.codes.remove(i);
-            }
-            "reset" => {
-                // 利用者が明示的に「未使用に戻す」ときだけ。自動では決してしない。
-                let c = &mut self.st.codes[i];
-                c.status = CodeStatus::Pending;
-                c.result = None;
-            }
-            _ => {
-                let c = &mut self.st.codes[i];
-                if let Some(t) = req.get("tag").and_then(|v| v.as_str()) {
-                    c.tag = t.trim().to_string();
-                }
-                if let Some(n) = req.get("note").and_then(|v| v.as_str()) {
-                    c.note = n.trim().to_string();
-                }
-            }
-        }
-        Ok(self.codes_json())
+    fn code_index(&self, id: &str) -> R<usize> {
+        self.st.codes.iter().position(|c| c.id == id).ok_or_else(|| local("そのコードは見つかりません。"))
     }
 
-    fn apply_code(&mut self, req: &Value) -> R<Value> {
-        let auto = arg_bool(req, "auto");
-        if !auto && arg_str(req, "confirm").as_deref() != Some(CODE_CONFIRM) {
-            return Err(local(format!("確認欄に「{CODE_CONFIRM}」と入力してください。")));
-        }
-        if auto && !self.st.settings.auto_codes {
-            return Err(local("設定でコードの自動適用が切られています。"));
-        }
-        self.gate()?;
-        self.backend()?;
+    pub fn remove_code(&mut self, id: &str) -> R<()> {
+        let i = self.code_index(id)?;
+        self.st.codes.remove(i);
+        self.st.pending.retain(|p| p.code_id.as_deref() != Some(id));
+        Ok(())
+    }
 
-        // どのコードを使うか
-        let idx = if let Some(raw) = arg_str(req, "code") {
-            if auto {
-                return Err(local("自動適用では、コード一覧に登録したものだけを使います。"));
-            }
-            let code = normalize_code(&raw).map_err(local)?;
-            match self.st.codes.iter().position(|c| c.code == code) {
-                Some(i) => i,
-                None => {
-                    let entry = CodeEntry {
-                        id: self.new_code_id(),
-                        code,
-                        tag: "手入力".into(),
-                        note: String::new(),
-                        status: CodeStatus::Pending,
-                        added_ms: self.now(),
-                        sent_ms: None,
-                        result: None,
-                    };
-                    self.st.codes.push(entry);
-                    self.st.codes.len() - 1
-                }
-            }
-        } else if let Some(id) = arg_str(req, "id") {
-            self.st.codes.iter().position(|c| c.id == id).ok_or_else(|| local("そのコードは見つかりません。"))?
-        } else {
-            let tag = arg_str(req, "tag");
-            self.st
-                .codes
-                .iter()
-                .position(|c| {
-                    c.status == CodeStatus::Pending
-                        && tag.as_ref().map(|t| c.tag.eq_ignore_ascii_case(t)).unwrap_or(true)
-                })
-                .ok_or_else(|| {
-                    local(match &tag {
-                        Some(t) => format!("タグ「{t}」の未使用コードがありません。"),
-                        None => "未使用のコードがありません。".into(),
-                    })
-                })?
-        };
-        if self.st.codes[idx].status != CodeStatus::Pending {
-            return Err(local(
-                "このコードはすでに送っています。結果は契約中のトッピングで確認してください(送り直すには、コード一覧で「未使用に戻す」を押してください)。",
-            ));
-        }
-        if let Some(t) = self.st.last_code_sent_ms {
-            let left = CODE_COOLDOWN_MS - (self.now() - t);
-            if left > 0 {
-                return Err(local(format!("コードの送信は15秒に1回までです。あと{}秒待ってください。", left / 1000 + 1)));
-            }
-        }
+    /// 利用者が明示的に「未使用に戻す」ときだけ。自動では決してしない。
+    pub fn reset_code(&mut self, id: &str) -> R<()> {
+        let i = self.code_index(id)?;
+        let c = &mut self.st.codes[i];
+        c.status = CodeStatus::Pending;
+        c.result = None;
+        Ok(())
+    }
 
-        // データ使い放題の有効期間中は送らない(公式アプリの注意書き)。
-        let snap = self.recent_snapshot(UNLIMITED_CHECK_MAX_AGE_MS)?;
-        match snap.get("unlimited_active").and_then(|v| v.as_bool()) {
-            Some(true) => {
-                let msg = "データ使い放題の有効期間中なので、コードを送りません(公式アプリの注意書きと同じ)。";
-                if auto {
-                    self.log("warn", msg);
-                }
-                return Err(local(msg));
-            }
-            Some(false) => {}
-            None if auto => {
-                let msg = "契約中のトッピングを読めず、使い放題中か確かめられないので、自動ではコードを送りません。";
-                self.log("warn", msg);
-                return Err(local(msg));
-            }
-            None => {}
-        }
+    pub fn update_code(&mut self, id: &str, tag: &str, note: &str) -> R<()> {
+        let i = self.code_index(id)?;
+        let c = &mut self.st.codes[i];
+        c.tag = tag.trim().to_string();
+        c.note = note.trim().to_string();
+        Ok(())
+    }
 
-        let masked = mask(&self.st.codes[idx].code);
-        let tag = self.st.codes[idx].tag.clone();
-        if auto && (self.st.settings.dry_run || arg_bool(req, "dry_run")) {
-            self.log("action", format!("(試運転)コード {masked}({tag})を適用するところでした"));
-            return Ok(json!({ "dry_run": true, "id": self.st.codes[idx].id, "masked": masked, "tag": tag }));
-        }
+    pub(crate) fn code_cooldown_left_ms(&self) -> i64 {
+        self.st.last_code_sent_ms.map(|t| CODE_COOLDOWN_MS - (self.now() - t)).unwrap_or(0)
+    }
 
-        // 送信前に記録・保存する。
+    /// コードを送る(手動・ルール共通)。送る前に「送信済み」にして保存する。
+    /// povo が受け付けなかった(codeValid=false)ときは Ok(valid=false)。
+    pub(crate) fn send_code(&mut self, idx: usize, who: &str) -> R<CodeResult> {
         let now = self.now();
         {
             let c = &mut self.st.codes[idx];
@@ -1056,36 +788,43 @@ impl Engine {
         self.st.last_code_sent_ms = Some(now);
         self.save();
         let code = self.st.codes[idx].code.clone();
-        let who = if auto { "自動適用" } else { "コード適用" };
-        let r = self.povo(move |b| b.apply_code(&code));
-        let id = self.st.codes[idx].id.clone();
-        match r {
+        let masked = mask(&code);
+        let tag = self.st.codes[idx].tag.clone();
+        match self.povo(move |b| b.apply_code(&code)) {
             Ok(raw) => match parse::code_result(&raw) {
                 Some(v) => {
                     let valid = v["valid"].as_bool().unwrap_or(false);
-                    let text = [v["title"].as_str(), v["subtitle"].as_str(), v["message"].as_str()]
+                    let title = v["title"].as_str().map(String::from);
+                    let message = [v["subtitle"].as_str(), v["message"].as_str()]
                         .into_iter()
                         .flatten()
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" / ");
+                    let text = [title.clone().unwrap_or_default(), message.clone()]
+                        .into_iter()
                         .filter(|s| !s.is_empty())
                         .collect::<Vec<_>>()
                         .join(" / ");
                     let c = &mut self.st.codes[idx];
                     c.status = if valid { CodeStatus::Applied } else { CodeStatus::Rejected };
                     c.result = Some(text.clone());
-                    self.st.snapshot_ms = 0;
-                    if valid {
-                        self.log("action", format!("{who}: {masked}({tag})を適用しました: {text}"));
-                    } else {
-                        self.log("warn", format!("{who}: {masked}({tag})は受け付けられませんでした: {text}"));
+                    if let Some(s) = self.st.snapshot.as_mut() {
+                        s.fetched_ms = 0;
                     }
-                    Ok(json!({ "dry_run": false, "id": id, "masked": masked, "tag": tag, "valid": valid, "result": v }))
+                    if valid {
+                        self.log(LogLevel::Action, format!("{who}: {masked}({tag})を適用しました: {text}"));
+                    } else {
+                        self.log(LogLevel::Warn, format!("{who}: {masked}({tag})は受け付けられませんでした: {text}"));
+                    }
+                    Ok(CodeResult { masked, tag, valid, title, message: Some(message).filter(|m| !m.is_empty()) })
                 }
                 None => {
-                    let msg = "応答の形を読めませんでした。適用されたかどうかは、契約中のトッピングで確認してください。";
+                    let msg = "応答の形を読めませんでした。適用されたかどうかは、ご利用中のトッピングで確認してください。";
                     let c = &mut self.st.codes[idx];
                     c.status = CodeStatus::Error;
                     c.result = Some(msg.into());
-                    self.log("error", format!("{who}: {masked}: {msg}"));
+                    self.log(LogLevel::Error, format!("{who}: {masked}: {msg}"));
                     Err(local(msg))
                 }
             },
@@ -1093,257 +832,173 @@ impl Engine {
                 let c = &mut self.st.codes[idx];
                 c.status = CodeStatus::Error;
                 c.result = Some(f.message.clone());
-                self.log("error", format!("{who}失敗: {masked}: {}", f.message));
+                self.log(LogLevel::Error, format!("{who}に失敗: {masked}: {}", f.message));
                 Err(f)
             }
         }
     }
 
-    // ---- 設定 -------------------------------------------------------------------------
+    /// 「使い放題中か」の確認。止めるべき理由があれば Some(理由)。
+    /// strict なら「分からない」ときも止める(ルールによる適用)。
+    pub(crate) fn unlimited_block(&mut self, strict: bool) -> R<Option<String>> {
+        let snap = self.recent_snapshot(5 * 60 * 1000)?;
+        Ok(unlimited_reason(snap.unlimited.active, strict))
+    }
 
-    fn settings_set(&mut self, req: &Value) -> R<Value> {
-        let s = &mut self.st.settings;
-        let before = s.clone();
-        if let Some(v) = req.get("dry_run").and_then(|v| v.as_bool()) {
-            s.dry_run = v;
+    /// コード画面からの手動適用。確認語が要る。
+    pub fn apply_code_manual(&mut self, id: Option<String>, raw: Option<String>, confirm: &str) -> R<CodeResult> {
+        if confirm.trim() != CODE_CONFIRM {
+            return Err(local(format!("確認欄に「{CODE_CONFIRM}」と入力してください。")));
         }
-        if let Some(v) = req.get("monthly_cap_yen").and_then(|v| v.as_u64()) {
-            s.monthly_cap_yen = v.min(100_000) as u32;
-        }
-        if let Some(v) = req.get("max_auto_orders_per_day").and_then(|v| v.as_u64()) {
-            s.max_auto_orders_per_day = v.min(20) as u32;
-        }
-        if let Some(v) = req.get("auto_order_gap_min").and_then(|v| v.as_u64()) {
-            s.auto_order_gap_min = v.min(24 * 60) as u32;
-        }
-        if let Some(v) = req.get("auto_codes").and_then(|v| v.as_bool()) {
-            s.auto_codes = v;
-        }
-        let after = s.clone();
-        if before.dry_run != after.dry_run {
-            self.log("info", if after.dry_run { "試運転モードにしました" } else { "試運転モードを切りました(自動の購入・コード適用が実際に行われます)" });
-        }
-        Ok(json!(after))
-    }
-}
-
-/// 残量とトッピングから、スクリプトが使いやすい形を作る。
-fn derive_snapshot(now: i64, usage: Option<Value>, toppings: Option<Value>, toppings_error: Option<String>, profile: Value) -> Value {
-    let left_kb: Option<f64> = usage.as_ref().and_then(|u| u.get("buckets")).and_then(|b| b.as_array()).map(|bs| {
-        bs.iter().filter_map(|b| b.get("left_kb").and_then(|v| v.as_f64())).sum()
-    });
-    // 契約中のトッピングに「使い放題」があれば有効期間中とみなす(「かけ放題」は通話なので別)。
-    let unlimited = toppings.as_ref().and_then(|t| t.as_array()).map(|list| {
-        list.iter()
-            .find(|t| t.get("name").and_then(|v| v.as_str()).is_some_and(|n| n.contains("使い放題")))
-            .cloned()
-    });
-    json!({
-        "fetched_ms": now,
-        "usage": usage,
-        "toppings": toppings,
-        "toppings_error": toppings_error,
-        "left_kb": left_kb,
-        "unlimited_active": unlimited.as_ref().map(|u| u.is_some()),
-        "unlimited": unlimited.flatten(),
-        "profile": profile,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn engine() -> (Engine, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("povo-auto-test-{}", rand::random::<u64>()));
-        let e = Engine::open(dir.to_str().unwrap(), true, None);
-        (e, dir)
-    }
-
-    fn login(e: &mut Engine) {
-        e.handle("login_start", &json!({"email": "a@example.com"})).unwrap();
-        let r = e.handle("login_otp", &json!({"code": "000000"})).unwrap();
-        assert_eq!(r["done"], true);
-    }
-
-    #[test]
-    fn prices() {
-        assert_eq!(price_yen("390円"), Some(390));
-        assert_eq!(price_yen("2,700円"), Some(2700));
-        assert_eq!(price_yen("¥330"), Some(330));
-        assert_eq!(price_yen("330円(税込)"), Some(330));
-        assert_eq!(price_yen("1,000"), Some(1000));
-        assert_eq!(price_yen("無料"), Some(0));
-        assert_eq!(price_yen("価格未定"), None);
-        assert_eq!(price_yen(""), None);
-    }
-
-    #[test]
-    fn masking() {
-        assert_eq!(mask("ABCDEFGH"), "AB••••GH");
-        assert_eq!(mask("ABC"), "•••");
-    }
-
-    #[test]
-    fn login_and_snapshot() {
-        let (mut e, _) = engine();
-        assert!(e.handle("snapshot", &json!({})).is_err());
-        login(&mut e);
-        let s = e.handle("snapshot", &json!({})).unwrap();
-        assert!(s["left_kb"].as_f64().unwrap() > 0.0);
-        assert_eq!(s["unlimited_active"], false);
-        // 30秒以内は前回の結果
-        let s2 = e.handle("snapshot", &json!({})).unwrap();
-        assert_eq!(s2["cached"], true);
-    }
-
-    #[test]
-    fn session_persists_in_mock_state() {
-        let (mut e, dir) = engine();
-        login(&mut e);
-        let e2 = Engine::open(dir.to_str().unwrap(), true, None);
-        assert!(e2.session.is_some());
-    }
-
-    #[test]
-    fn auto_order_respects_dry_run_budget_and_3ds() {
-        let (mut e, _) = engine();
-        login(&mut e);
-        e.clock = Some(1_790_000_000_000);
-        // 既定は試運転
-        let r = e.handle("order", &json!({"sku": "MOCK_UNLIMITED_1H", "auto": true})).unwrap();
-        assert_eq!(r["dry_run"], true);
-        assert!(e.st.ledger.is_empty());
-
-        e.handle("settings_set", &json!({"dry_run": false, "monthly_cap_yen": 400, "max_auto_orders_per_day": 5, "auto_order_gap_min": 0})).unwrap();
-        // 3DS が要る商品は自動では買わない
-        assert!(e.handle("order", &json!({"sku": "MOCK_DATA_20GB_30D", "auto": true})).is_err());
-        // 一覧に無い商品
-        assert!(e.handle("order", &json!({"sku": "NOPE", "auto": true})).is_err());
-        // 330円は通る
-        let r = e.handle("order", &json!({"sku": "MOCK_UNLIMITED_24H", "auto": true})).unwrap();
-        assert_eq!(r["dry_run"], false);
-        assert_eq!(e.st.ledger.last().unwrap().status, "ok");
-        // 同じ商品はすぐには不可
-        assert!(e.handle("order", &json!({"sku": "MOCK_UNLIMITED_24H", "auto": true})).is_err());
-        // 110円は上限400を超える(330+110)
-        e.clock = Some(1_790_000_000_000 + 200_000);
-        let err = e.handle("order", &json!({"sku": "MOCK_UNLIMITED_1H", "auto": true})).unwrap_err();
-        assert!(err.message.contains("上限"));
-        assert_eq!(e.budget()["auto_spent_yen"], 330);
-    }
-
-    #[test]
-    fn auto_order_daily_limit_and_gap() {
-        let (mut e, _) = engine();
-        login(&mut e);
-        let t0 = 1_790_000_000_000;
-        e.clock = Some(t0);
-        e.handle("settings_set", &json!({"dry_run": false, "monthly_cap_yen": 5000, "max_auto_orders_per_day": 1, "auto_order_gap_min": 30})).unwrap();
-        e.handle("order", &json!({"sku": "MOCK_UNLIMITED_1H", "auto": true})).unwrap();
-        e.clock = Some(t0 + 10 * 60_000);
-        assert!(e.handle("order", &json!({"sku": "MOCK_DATA_1GB_7D", "auto": true})).unwrap_err().message.contains("今日"));
-        e.handle("settings_set", &json!({"max_auto_orders_per_day": 5})).unwrap();
-        assert!(e.handle("order", &json!({"sku": "MOCK_DATA_1GB_7D", "auto": true})).unwrap_err().message.contains("分経って"));
-    }
-
-    #[test]
-    fn manual_order_needs_confirm() {
-        let (mut e, _) = engine();
-        login(&mut e);
-        assert!(e.handle("order", &json!({"sku": "MOCK_DATA_1GB_7D"})).is_err());
-        let r = e.handle("order", &json!({"sku": "MOCK_DATA_20GB_30D", "confirm": "購入する"})).unwrap();
-        assert_eq!(r["needs_3ds"], true);
-        assert_eq!(e.st.ledger.last().unwrap().status, "needs_3ds");
-    }
-
-    #[test]
-    fn forbidden_halts_everything() {
-        let (mut e, dir) = engine();
-        login(&mut e);
-        let err = e.handle("order", &json!({"sku": "MOCK_FORBIDDEN", "confirm": "購入する"})).unwrap_err();
-        assert!(err.halt);
-        assert!(e.handle("snapshot", &json!({"force": true})).unwrap_err().halt);
-        // 停止は保存され、次の起動(バックグラウンド)でも続く
-        let mut e2 = Engine::open(dir.to_str().unwrap(), true, None);
-        assert!(e2.handle("snapshot", &json!({"force": true})).unwrap_err().halt);
-        e2.handle("unhalt", &json!({})).unwrap();
-        assert!(e2.handle("snapshot", &json!({"force": true})).is_ok());
-    }
-
-    #[test]
-    fn codes_flow() {
-        let (mut e, _) = engine();
-        login(&mut e);
-        let r = e.handle("codes_add", &json!({"text": "mockok 1gb 7日\nMOCKUSED,unl\nbad!code\n# comment\nMOCKOK"})).unwrap();
-        assert_eq!(r["added"], 2);
-        assert_eq!(r["duplicates"].as_array().unwrap().len(), 1);
-        assert_eq!(r["invalid"].as_array().unwrap().len(), 1);
-        e.clock = Some(1_790_000_000_000);
-        // 既定は試運転なので送らない
-        let d = e.handle("apply_code", &json!({"auto": true})).unwrap();
-        assert_eq!(d["dry_run"], true);
-        assert_eq!(e.st.codes[0].status, CodeStatus::Pending);
-        e.handle("settings_set", &json!({"dry_run": false})).unwrap();
-        let ok = e.handle("apply_code", &json!({"auto": true, "tag": "1GB"})).unwrap();
-        assert_eq!(ok["valid"], true);
-        assert_eq!(e.st.codes[0].status, CodeStatus::Applied);
-        // 15秒は空ける
-        assert!(e.handle("apply_code", &json!({"auto": true})).unwrap_err().message.contains("15秒"));
-        e.clock = Some(1_790_000_000_000 + 16_000);
-        let used = e.handle("apply_code", &json!({"auto": true})).unwrap();
-        assert_eq!(used["valid"], false);
-        assert_eq!(e.st.codes[1].status, CodeStatus::Rejected);
-        // 未使用はもう無い
-        e.clock = Some(1_790_000_000_000 + 40_000);
-        assert!(e.handle("apply_code", &json!({"auto": true})).is_err());
-        // 手入力は確認語が要る
-        assert!(e.handle("apply_code", &json!({"code": "MOCKOK"})).is_err());
-        // 送ったコードは手入力でも送り直さない
-        assert!(e.handle("apply_code", &json!({"code": "mockok", "confirm": "利用する"})).unwrap_err().message.contains("すでに"));
-    }
-
-    #[test]
-    fn unlimited_blocks_codes() {
-        let snap = derive_snapshot(
-            0,
-            parse::usage(crate::mock::USAGE),
-            Some(json!([{"section": "データ", "name": "データ使い放題(24時間)", "remaining": null, "expiry": "x"}])),
-            None,
-            Value::Null,
-        );
-        assert_eq!(snap["unlimited_active"], true);
-        let kake = derive_snapshot(0, None, Some(json!([{"name": "5分以内通話かけ放題"}])), None, Value::Null);
-        assert_eq!(kake["unlimited_active"], false);
-        let unknown = derive_snapshot(0, None, None, Some("x".into()), Value::Null);
-        assert!(unknown["unlimited_active"].is_null());
-
-        let (mut e, _) = engine();
-        login(&mut e);
-        e.handle("settings_set", &json!({"dry_run": false})).unwrap();
-        e.handle("codes_add", &json!({"text": "MOCKOK"})).unwrap();
-        e.handle("snapshot", &json!({})).unwrap();
-        let now = e.now();
-        e.st.snapshot = Some(snap);
-        e.st.snapshot_ms = now;
-        assert!(e.handle("apply_code", &json!({"auto": true})).unwrap_err().message.contains("使い放題"));
-        assert_eq!(e.st.codes[0].status, CodeStatus::Pending);
-    }
-
-    #[test]
-    fn rate_limit() {
-        let (mut e, _) = engine();
-        login(&mut e);
-        let mut t = 1_790_000_000_000;
-        let mut failed = false;
-        for _ in 0..30 {
-            t += 6_000;
-            e.clock = Some(t);
-            if e.handle("snapshot", &json!({"force": true})).is_err() {
-                failed = true;
-                break;
+        self.gate()?;
+        self.backend()?;
+        let idx = if let Some(raw) = clean(raw) {
+            let code = normalize_code(&raw).map_err(local)?;
+            match self.st.codes.iter().position(|c| c.code == code) {
+                Some(i) => i,
+                None => {
+                    let now = self.now();
+                    self.st.codes.push(CodeEntry {
+                        id: new_id(),
+                        masked: mask(&code),
+                        code,
+                        tag: "手入力".into(),
+                        note: String::new(),
+                        status: CodeStatus::Pending,
+                        added_ms: now,
+                        sent_ms: None,
+                        result: None,
+                    });
+                    self.st.codes.len() - 1
+                }
             }
+        } else if let Some(id) = clean(id) {
+            self.code_index(&id)?
+        } else {
+            return Err(local("コードが指定されていません。"));
+        };
+        if self.st.codes[idx].status != CodeStatus::Pending {
+            return Err(local(
+                "このコードはすでに送っています。結果はご利用中のトッピングで確認してください(送り直すには、コード一覧で「未使用に戻す」)。",
+            ));
         }
-        assert!(failed, "5分20回の上限で止まるはず");
+        let left = self.code_cooldown_left_ms();
+        if left > 0 {
+            return Err(local(format!("コードの送信は15秒に1回までです。あと{}秒待ってください。", left / 1000 + 1)));
+        }
+        if let Some(reason) = self.unlimited_block(false)? {
+            return Err(local(reason));
+        }
+        let id = self.st.codes[idx].id.clone();
+        self.st.pending.retain(|p| p.code_id.as_deref() != Some(id.as_str()));
+        self.send_code(idx, "コード適用")
+    }
+
+    // ---- 設定・記録 ---------------------------------------------------------------------
+
+    pub fn settings(&self) -> Settings {
+        self.st.settings.clone()
+    }
+
+    pub fn update_settings(&mut self, mut s: Settings) -> Settings {
+        s.monthly_cap_yen = s.monthly_cap_yen.min(100_000);
+        s.max_rule_orders_per_day = s.max_rule_orders_per_day.min(20);
+        s.order_gap_min = s.order_gap_min.min(24 * 60);
+        s.confirm_ttl_min = s.confirm_ttl_min.clamp(5, 24 * 60);
+        s.check_min_interval_min = s.check_min_interval_min.clamp(15, 24 * 60);
+        s.check_max_interval_min = s.check_max_interval_min.clamp(s.check_min_interval_min, 24 * 60);
+        let before = self.st.settings.clone();
+        let label = |m: ActionMode| match m {
+            ActionMode::Off => "しない",
+            ActionMode::Confirm => "通知で確認",
+            ActionMode::Auto => "自動",
+        };
+        if before.purchase_mode != s.purchase_mode {
+            self.log(LogLevel::Info, format!("ルールによる購入: {}", label(s.purchase_mode)));
+        }
+        if before.code_mode != s.code_mode {
+            self.log(LogLevel::Info, format!("ルールによるコード適用: {}", label(s.code_mode)));
+        }
+        if before.dry_run != s.dry_run {
+            self.log(LogLevel::Info, if s.dry_run { "試運転にしました(記録だけ)" } else { "試運転を切りました" });
+        }
+        self.st.settings = s.clone();
+        s
+    }
+
+    pub fn ledger(&self, limit: u32) -> Vec<LedgerEntry> {
+        self.st.ledger.iter().rev().take(limit as usize).cloned().collect()
+    }
+
+    pub fn logs(&self, limit: u32) -> Vec<LogEntry> {
+        self.st.log.iter().rev().take(limit as usize).cloned().collect()
+    }
+
+    pub fn clear_logs(&mut self) {
+        self.st.log.clear();
+    }
+}
+
+pub(crate) fn unlimited_reason(active: Option<bool>, strict: bool) -> Option<String> {
+    match active {
+        Some(true) => Some("データ使い放題の有効期間中なので、コードを送りません(公式アプリの注意書きと同じ)。".into()),
+        Some(false) => None,
+        None if strict => Some("ご利用中のトッピングを読めず、使い放題中か確かめられないので、コードを送りません。".into()),
+        None => None,
+    }
+}
+
+/// 残量とトッピングの読み取り結果から Snapshot を作る。
+pub(crate) fn build_snapshot(now: i64, usage: Option<&Value>, toppings: Option<&Value>, toppings_error: Option<String>) -> Snapshot {
+    let buckets: Vec<Bucket> = usage
+        .and_then(|u| u.get("buckets"))
+        .and_then(|b| b.as_array())
+        .map(|bs| {
+            bs.iter()
+                .map(|b| Bucket {
+                    key: b["key"].as_str().unwrap_or("").to_string(),
+                    label: b["label"].as_str().unwrap_or("").to_string(),
+                    used_kb: b["used_kb"].as_f64().unwrap_or(0.0),
+                    left_kb: b["left_kb"].as_f64().unwrap_or(0.0),
+                    plan_kb: b["plan_kb"].as_f64(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let left_kb = usage.map(|_| buckets.iter().map(|b| b.left_kb).sum());
+    let plan: f64 = buckets.iter().filter_map(|b| b.plan_kb).sum();
+    let toppings: Option<Vec<Topping>> = toppings.and_then(|t| t.as_array()).map(|list| {
+        list.iter()
+            .filter_map(|t| {
+                let name = t["name"].as_str()?.to_string();
+                let expiry = t["expiry"].as_str().map(String::from);
+                Some(Topping {
+                    section: t["section"].as_str().map(String::from),
+                    remaining: t["remaining"].as_str().map(String::from),
+                    expiry_ms: expiry.as_deref().and_then(jptime::parse_jp_datetime),
+                    expiry,
+                    name,
+                })
+            })
+            .collect()
+    });
+    // 「使い放題」のトッピングがあれば有効期間中とみなす(「かけ放題」は通話なので別)。
+    let unl = toppings.as_ref().map(|list| list.iter().find(|t| t.name.contains("使い放題")).cloned());
+    let unlimited = Unlimited {
+        active: unl.as_ref().map(|u| u.is_some()),
+        name: unl.as_ref().and_then(|u| u.as_ref().map(|t| t.name.clone())),
+        until_ms: unl.as_ref().and_then(|u| u.as_ref().and_then(|t| t.expiry_ms)),
+    };
+    Snapshot {
+        fetched_ms: now,
+        left_kb,
+        plan_kb: (plan > 0.0).then_some(plan),
+        buckets,
+        calls_used_sec: usage.and_then(|u| u["calls"]["used"].as_f64()),
+        sms_used: usage.and_then(|u| u["sms"]["used"].as_f64()),
+        toppings,
+        toppings_error,
+        unlimited,
+        cached: false,
     }
 }

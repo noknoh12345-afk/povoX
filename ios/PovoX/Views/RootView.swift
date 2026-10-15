@@ -1,116 +1,104 @@
 import SwiftUI
 
 struct RootView: View {
-    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var store: AppStore
 
     var body: some View {
         Group {
-            if let st = model.status {
+            if !store.onboardingDone {
+                OnboardingView()
+            } else if let st = store.status {
                 if st.loggedIn {
                     MainTabs()
                 } else {
                     LoginView()
                 }
             } else {
-                ProgressView("起動中…")
+                ProgressView()
             }
         }
-        .task { await model.reloadLocal() }
-        .alert(item: $model.error) { e in
-            Alert(title: Text(e.halt ? "通信を止めました" : "エラー"), message: Text(e.display), dismissButton: .default(Text("閉じる")))
+        .task { await store.reload() }
+        .alert(item: $store.alert) { a in
+            Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("閉じる")))
         }
-        .sheet(item: $model.challenge) { page in
+        .sheet(item: $store.challenge) { page in
             ChallengeView(page: page)
         }
         .overlay(alignment: .bottom) {
-            if let t = model.toast {
+            if let t = store.toast {
                 ToastView(text: t)
-                    .padding(.bottom, 70)
-                    .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-                            if model.toast == t { model.toast = nil }
-                        }
+                    .padding(.bottom, 64)
+                    .onTapGesture { store.toast = nil }
+                    .task(id: t) {
+                        try? await Task.sleep(nanoseconds: 3_500_000_000)
+                        if store.toast == t { store.toast = nil }
                     }
-                    .onTapGesture { model.toast = nil }
             }
         }
-        .animation(.easeOut(duration: 0.2), value: model.toast)
+        .animation(.spring(duration: 0.3), value: store.toast)
     }
 }
 
 struct MainTabs: View {
+    @EnvironmentObject var store: AppStore
+
     var body: some View {
-        TabView {
+        TabView(selection: $store.tab) {
             HomeView()
-                .tabItem { Label("ホーム", systemImage: "antenna.radiowaves.left.and.right") }
-            AutomationView()
-                .tabItem { Label("自動化", systemImage: "bolt.badge.clock") }
+                .tabItem { Label("ホーム", systemImage: "gauge.with.dots.needle.67percent") }
+                .tag(AppTab.home)
+            ActivityView()
+                .tabItem { Label("履歴", systemImage: "clock.arrow.circlepath") }
+                .tag(AppTab.activity)
+                .badge(store.pending.count)
+            RulesView()
+                .tabItem { Label("ルール", systemImage: "curlybraces.square") }
+                .tag(AppTab.rules)
             CodesView()
                 .tabItem { Label("コード", systemImage: "ticket") }
-            ShopView()
-                .tabItem { Label("トッピング", systemImage: "cart") }
+                .tag(AppTab.codes)
             SettingsView()
                 .tabItem { Label("設定", systemImage: "gearshape") }
+                .tag(AppTab.settings)
         }
     }
 }
 
-struct ToastView: View {
-    let text: String
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
-            .padding(.horizontal, 24)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-}
-
-/// 停止中・試運転中・モックの帯。
+/// 停止中・待機中・モック・試運転の帯。
 struct StatusBanners: View {
-    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var store: AppStore
 
     var body: some View {
         VStack(spacing: 8) {
-            if let reason = model.status?.halted {
+            if let reason = store.status?.halted {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("安全のため povo への通信を止めています", systemImage: "hand.raised.fill")
-                        .font(.subheadline.bold())
+                        .font(.subheadline.weight(.bold))
                     Text(reason).font(.caption)
-                    Text("自動チェックも止まっています。原因を確かめてから再開してください。").font(.caption)
-                    Button("通信を再開") { Task { await model.unhalt() } }
+                    Text("自動チェックも止まっています。原因を確かめてから再開してください。").font(.caption).foregroundStyle(.secondary)
+                    Button("通信を再開") { Task { await store.unhalt() } }
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.danger)
+                        .accessibilityIdentifier("banner.unhalt")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .padding(14)
+                .background(Theme.danger.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            if let until = model.status?.blockedUntilMs {
-                Label("povo から待機を求められています(\(Date(timeIntervalSince1970: Double(until) / 1000).formatted(date: .omitted, time: .shortened)) まで)", systemImage: "clock")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+            if let until = store.status?.blockedUntilMs {
+                banner("povo から待機を求められています(\(Fmt.when(ms: until)) まで)", "clock", .orange)
             }
-            if model.status?.mock == true {
-                Label("モック: povo には通信していません(作り物のデータ)", systemImage: "theatermasks")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            }
-            if model.status?.settings.dryRun == true {
-                Label("試運転中: 自動の購入・コード適用は実際には行いません", systemImage: "testtube.2")
-                    .font(.caption)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Theme.yellow.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+            if store.status?.settings.dryRun == true {
+                banner("試運転中: ルールの判断を記録するだけで、確認も実行もしません", "testtube.2", .purple)
             }
         }
+    }
+
+    private func banner(_ text: String, _ icon: String, _ tint: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
