@@ -1,0 +1,24 @@
+[package]
+name = "povo-auto"
+version = "0.1.0"
+edition = "2021"
+description = "povoX(iOS)の中身: povo-core を使った残量取得・自動購入・コード適用の安全装置つきエンジン(非公式)"
+publish = false
+
+[lib]
+name = "povo_auto"
+# staticlib は iOS アプリに静的リンクする。lib はテスト用。
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+# povo-web / povo-android と同じコミットに固定する。
+povo-core = { git = "https://github.com/uirooong/povo-core", rev = "d516db1147732124718630bedaadf5529e85b00a" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+base64 = "0.22"
+
+[profile.release]
+opt-level = "s"
+lto = true
+# panic = "abort" にしない: FFI 境界で catch_unwind してアプリを落とさないため。

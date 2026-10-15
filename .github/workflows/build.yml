@@ -1,0 +1,110 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          rustc --version || true
+          cargo --version || true
+
+      - name: Rust target
+        run: rustup target add aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Test core (mock, no network to povo)
+        working-directory: core
+        run: cargo test --lib
+
+      - name: Build core for iOS
+        working-directory: core
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        run: |
+          cargo build --release --lib --target aarch64-apple-ios
+          ls -lh target/aarch64-apple-ios/release/libpovo_auto.a
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build app (unsigned)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project PovoX.xcodeproj -target PovoX -configuration Release \
+            -sdk iphoneos SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee xcodebuild.log | grep -E "error:|\*\* BUILD" || true
+          test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Report build errors
+        if: failure()
+        run: |
+          # 失敗理由を Actions の注釈に出す(ログを開かなくても見えるように)
+          for f in ios/xcodebuild.log; do
+            [ -f "$f" ] && grep -E "error:" "$f" | sort -u | head -40 | while IFS= read -r line; do
+              echo "::error::${line//$'\n'/ }"
+            done || true
+          done
+          # ログ全体を ci-logs ブランチに置く
+          mkdir -p /tmp/ci-logs
+          cp ios/xcodebuild.log /tmp/ci-logs/ 2>/dev/null || true
+          cd /tmp/ci-logs
+          git init -q
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "logs for ${GITHUB_SHA}" || exit 0
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-logs || true
+
+      - name: Package IPA
+        working-directory: ios
+        run: |
+          APP=build/Release-iphoneos/povoX.app
+          test -d "$APP"
+          ls "$APP"
+          test -d "$APP/Metadata.appintents" && echo "App Intents metadata: OK" || echo "::warning::App Intents metadata not found"
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry povoX.ipa Payload
+          ls -lh povoX.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: povoX-ipa
+          path: ios/povoX.ipa
+          if-no-files-found: error
+
+      - name: Publish to Releases (latest)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" ios/povoX.ipa \
+            --title "povoX build ${GITHUB_RUN_NUMBER}" \
+            --notes "未署名の IPA です。Sideloadly などで自分の Apple ID で署名して入れてください。commit ${GITHUB_SHA::7}" \
+            --target "${GITHUB_SHA}" --latest
