@@ -257,6 +257,51 @@ pub struct AccountProfile {
     pub activation_date: Option<String>,
 }
 
+/// 料金最適化: 買い方の 1 手(同じ商品を数量ぶん)。
+#[derive(uniffi::Record, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OptimizeItem {
+    pub sku: String,
+    pub name: String,
+    /// 1 個の価格。合計は price_yen × qty。
+    pub price_yen: u32,
+    pub qty: u32,
+    /// "data" / "unlimited"
+    pub kind: String,
+}
+
+/// 料金最適化: まかない方の候補(データで埋める / 使い放題でまかなう など)。
+#[derive(uniffi::Record, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OptimizeOption {
+    pub label: String,
+    pub items: Vec<OptimizeItem>,
+    pub total_yen: u32,
+    /// 必要量を満たすか。
+    pub covers: bool,
+    /// 月の上限の残りで収まるか。
+    pub within_budget: bool,
+}
+
+/// 料金最適化の結果。「この先 H 時間を、最小の金額でまかなう買い方」。
+#[derive(uniffi::Record, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OptimizePlan {
+    pub horizon_hours: u32,
+    /// 最近の減り方(MB/時)。不明なら None。
+    pub rate_mb_per_hour: Option<f64>,
+    pub remaining_mb: Option<f64>,
+    /// 追加で必要なデータ量(MB)。None=予測不能、0=既に足りる。
+    pub needed_mb: Option<f64>,
+    /// 追加購入なしで足りるか。
+    pub covered: bool,
+    /// 手持ちの未使用コード枚数(まず試すと必要量が減るかも。中身は使うまで不明)。
+    pub codes_on_hand: u32,
+    /// 推奨(カバーできるうち最安)。
+    pub best: Option<OptimizeOption>,
+    /// 比較用の候補(安い順)。
+    pub options: Vec<OptimizeOption>,
+    pub budget_remaining_yen: u32,
+    pub note: Option<String>,
+}
+
 #[derive(uniffi::Enum, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OrderSource {

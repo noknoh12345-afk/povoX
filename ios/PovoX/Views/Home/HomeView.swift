@@ -15,6 +15,7 @@ struct HomeView: View {
                         PendingCard(pending: p)
                     }
                     UsageChartCard(history: store.history, insights: store.insights, snapshot: store.snapshot)
+                    HomeOptimizeCard()
                     QuickActions(showShop: $showShop)
                     if let run = store.runs.first {
                         LastRunCard(run: run)

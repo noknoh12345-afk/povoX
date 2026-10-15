@@ -27,6 +27,14 @@ struct ShopView: View {
 
     var body: some View {
         List {
+            Section {
+                NavigationLink { OptimizeView() } label: {
+                    Label("最安の買い方を見る", systemImage: "sparkles")
+                }
+                .accessibilityIdentifier("shop.optimize")
+            } footer: {
+                Text("今の減り方から、この先をまかなう一番安い買い方(コード→データ→使い放題)を出します。")
+            }
             if store.catalog == nil {
                 Section {
                     Button {

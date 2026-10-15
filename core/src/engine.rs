@@ -581,6 +581,132 @@ impl Engine {
         })
     }
 
+    // ---- 料金最適化 ------------------------------------------------------------
+
+    /// この先 `horizon_hours` 時間を、最小の金額でまかなう買い方を出す。
+    /// povo には通信しない(取得済みの残量・一覧・履歴・予算・コードだけを使う)。
+    /// 3DS が要る商品は povoX が自動で買えないので候補から除く(助言も実際に合わせる)。
+    pub fn optimize(&self, horizon_hours: u32) -> OptimizePlan {
+        let horizon = horizon_hours.max(1);
+        let budget = self.budget();
+        let codes_on_hand = self.st.codes.iter().filter(|c| c.status == CodeStatus::Pending).count() as u32;
+        let mut plan = OptimizePlan {
+            horizon_hours: horizon,
+            rate_mb_per_hour: None,
+            remaining_mb: None,
+            needed_mb: None,
+            covered: false,
+            codes_on_hand,
+            best: None,
+            options: vec![],
+            budget_remaining_yen: budget.remaining_yen,
+            note: None,
+        };
+
+        let Some(snap) = &self.st.snapshot else {
+            plan.note = Some("残量がまだ取得できていません。先に残量を更新してください。".into());
+            return plan;
+        };
+        if snap.unlimited.active == Some(true) {
+            plan.covered = true;
+            plan.note = Some("使い放題中なので、追加購入は要りません。".into());
+            return plan;
+        }
+        let Some(left_kb) = snap.left_kb else {
+            plan.note = Some("残量を読めなかったので、必要量を計算できません。".into());
+            return plan;
+        };
+        let remaining_mb = left_kb / 1024.0;
+        plan.remaining_mb = Some(remaining_mb);
+
+        let insights = self.insights();
+        let rate_mb_h = insights.kb_per_hour.map(|k| k / 1024.0);
+        plan.rate_mb_per_hour = rate_mb_h;
+        let Some(rate) = rate_mb_h else {
+            plan.note = Some("減り方がまだ分からないので、必要量を計算できません(しばらく使うと出ます)。".into());
+            return plan;
+        };
+
+        let needed_mb = (rate * horizon as f64) - remaining_mb;
+        plan.needed_mb = Some(needed_mb.max(0.0));
+        if needed_mb <= 0.0 {
+            plan.covered = true;
+            plan.note = Some(format!("この先{horizon}時間は、今の残りでまかなえます。"));
+            return plan;
+        }
+        let needed_gb = needed_mb / 1024.0;
+
+        let Some(catalog) = &self.st.catalog else {
+            plan.note = Some("トッピング一覧が未取得です。一覧を読み込むと最安の買い方を出せます。".into());
+            return plan;
+        };
+        let affordable = |yen: u32| yen <= budget.remaining_yen;
+
+        let mut options: Vec<OptimizeOption> = vec![];
+
+        // 候補1: データ追加で必要量を埋める(1GBあたり最安の商品を、足りるぶんだけ)。
+        let best_data = catalog
+            .products
+            .iter()
+            .filter(|p| !p.unlimited && !p.requires_3ds)
+            .filter_map(|p| Some((p, p.data_gb?, p.price_yen?, p.yen_per_gb?)))
+            .min_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some((p, gb, price, _)) = best_data {
+            if gb > 0.0 {
+                let qty = (needed_gb / gb).ceil().max(1.0) as u32;
+                let total = price.saturating_mul(qty);
+                options.push(OptimizeOption {
+                    label: format!("データ追加でまかなう({}を{}個)", p.name, qty),
+                    items: vec![OptimizeItem { sku: p.sku.clone(), name: p.name.clone(), price_yen: price, qty, kind: "data".into() }],
+                    total_yen: total,
+                    covers: true,
+                    within_budget: affordable(total),
+                });
+            }
+        }
+
+        // 候補2: 使い放題でまかなう(その時間、データ無制限)。期間が足りるものを最安で。
+        let mut unls: Vec<&Product> = catalog
+            .products
+            .iter()
+            .filter(|p| p.unlimited && !p.requires_3ds && p.price_yen.is_some())
+            .collect();
+        unls.sort_by_key(|p| p.price_yen.unwrap_or(u32::MAX));
+        if let Some(p) = unls.iter().find(|p| p.hours.unwrap_or(0.0) >= horizon as f64) {
+            let price = p.price_yen.unwrap_or(0);
+            options.push(OptimizeOption {
+                label: format!("使い放題でまかなう({})", p.name),
+                items: vec![OptimizeItem { sku: p.sku.clone(), name: p.name.clone(), price_yen: price, qty: 1, kind: "unlimited".into() }],
+                total_yen: price,
+                covers: true,
+                within_budget: affordable(price),
+            });
+        } else if let Some(p) = unls.first() {
+            // 期間が足りる使い放題が無いときは、一番安い使い放題を「部分的」に提示。
+            let price = p.price_yen.unwrap_or(0);
+            let hrs = p.hours.unwrap_or(0.0);
+            options.push(OptimizeOption {
+                label: format!("使い放題({})※{}時間ぶんだけ", p.name, hrs as u32),
+                items: vec![OptimizeItem { sku: p.sku.clone(), name: p.name.clone(), price_yen: price, qty: 1, kind: "unlimited".into() }],
+                total_yen: price,
+                covers: false,
+                within_budget: affordable(price),
+            });
+        }
+
+        options.sort_by_key(|o| (!o.covers, o.total_yen));
+        plan.best = options.iter().find(|o| o.covers).cloned();
+        if plan.best.is_none() {
+            plan.note = Some("今の一覧では、この必要量をまかなえる商品が見つかりませんでした。".into());
+        } else if codes_on_hand > 0 {
+            plan.note = Some(format!(
+                "手持ちのコード{codes_on_hand}枚を先に試すと、必要量が減って安くなるかもしれません(コードの中身は使うまで分かりません)。"
+            ));
+        }
+        plan.options = options;
+        plan
+    }
+
     // ---- 次の自動チェック ------------------------------------------------------------
 
     /// 次の自動チェックまでの目安(分)。残量の減り方・使い放題の終わり・残りの少なさで縮める。

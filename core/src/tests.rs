@@ -449,6 +449,47 @@ fn ffi_object_and_dev_call() {
 }
 
 #[test]
+fn optimize_cheapest_mix() {
+    let (mut e, _d) = engine("low"); // 残りわずか(0.25GB)から
+    login(&mut e);
+    e.snapshot(true).unwrap();
+    e.catalog(true).unwrap();
+    // たくさん要る短い窓: 使い放題が最安になるはず
+    let big = e.optimize(24);
+    assert!(!big.covered, "まだ足りない");
+    assert!(big.needed_mb.unwrap() > 0.0);
+    let best = big.best.expect("推奨があるはず");
+    // 24時間ぶん大量に要るので、データを何個も買うより 24時間使い放題(¥330)が安い
+    assert_eq!(best.items[0].sku, "MOCK_UNLIMITED_24H");
+    assert_eq!(best.total_yen, 330);
+    assert!(best.covers && best.within_budget);
+    // データ追加の候補も出ていて、使い放題より高い
+    let data = big.options.iter().find(|o| o.items[0].kind == "data").expect("データ候補");
+    assert!(data.total_yen > best.total_yen);
+
+    // ごく短い窓ならあまり要らない → データ追加(¥390)で足りる方が安いか、そもそも足りる
+    let small = e.optimize(1);
+    if !small.covered {
+        let b = small.best.unwrap();
+        assert!(b.total_yen <= 390);
+    }
+}
+
+#[test]
+fn optimize_handles_unknowns() {
+    let (mut e, _d) = engine("");
+    login(&mut e);
+    // 残量未取得
+    let p = e.optimize(24);
+    assert!(p.note.is_some() && p.best.is_none());
+    // 残量はあるが一覧未取得
+    e.snapshot(true).unwrap();
+    let p2 = e.optimize(24);
+    // 残量たっぷり(17GB超)なので「まかなえる」か、一覧未取得のどちらか
+    assert!(p2.covered || p2.note.as_deref().unwrap_or("").contains("一覧"));
+}
+
+#[test]
 fn bills_referral_profile() {
     let (mut e, _d) = engine("");
     login(&mut e);

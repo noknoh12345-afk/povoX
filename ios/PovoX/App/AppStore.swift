@@ -225,6 +225,11 @@ final class AppStore: ObservableObject {
         await work("billpdf") { try await client.call { try $0.billPdf(billId: id) } }
     }
 
+    /// 料金最適化(この先 horizon 時間を最小の金額でまかなう買い方)。通信しない。
+    func optimize(horizon: UInt32) async -> OptimizePlan {
+        await client.value { $0.optimize(horizonHours: horizon) }
+    }
+
     // MARK: - 設定
 
     func updateSettings(_ change: (inout Settings) -> Void) async {

@@ -127,6 +127,10 @@ impl PovoEngine {
     pub fn account_profile(&self) -> Result<AccountProfile, PovoXError> {
         self.write(|e| e.account_profile()).map_err(Into::into)
     }
+    /// 料金最適化(この先 horizon_hours 時間を最小の金額でまかなう買い方)。通信しない。
+    pub fn optimize(&self, horizon_hours: u32) -> OptimizePlan {
+        self.lock().optimize(horizon_hours)
+    }
     pub fn order(&self, sku: String, confirm: String) -> Result<OrderResult, PovoXError> {
         self.write(|e| e.order_manual(&sku, &confirm)).map_err(Into::into)
     }

@@ -325,6 +325,21 @@ func XCTUnwrapAsync<T>(_ v: T?, file: StaticString = #filePath, line: UInt = #li
     try XCTUnwrap(v, file: file, line: line)
 }
 
+final class OptimizeTests: XCTestCase {
+    func testOptimizeRecommendsCheapestThroughBinding() async throws {
+        let c = mockClient("low")
+        try await login(c)
+        _ = try await c.call { try $0.snapshot(force: true) }
+        _ = try await c.call { try $0.catalog(force: true) }
+        let plan = await c.value { $0.optimize(horizonHours: 24) }
+        XCTAssertFalse(plan.covered)
+        let best = try XCTUnwrap(plan.best)
+        XCTAssertTrue(best.covers)
+        XCTAssertEqual(best.totalYen, 330, "24時間は使い放題が最安")
+        XCTAssertTrue(plan.options.count >= 2, "比較候補が出る")
+    }
+}
+
 final class AccountTests: XCTestCase {
     func testBillsReferralProfileThroughBinding() async throws {
         let c = mockClient()
