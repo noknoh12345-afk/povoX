@@ -26,6 +26,12 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "rule.template") }
     }
 
+    /// レシピから作ったときのレシピ ID(編集・テンプレート選択で消える)。
+    var ruleRecipeID: String? {
+        get { defaults.string(forKey: "rule.recipe") }
+        set { defaults.set(newValue, forKey: "rule.recipe") }
+    }
+
     var backgroundEnabled: Bool {
         get { bool("bg.enabled", true) }
         set { defaults.set(newValue, forKey: "bg.enabled") }

@@ -3,6 +3,9 @@ import SwiftUI
 /// シミュレーター: 仮の状態でルールと安全装置の判断を見る。povo には通信せず、記録も残さない。
 struct SimulatorView: View {
     @EnvironmentObject var store: AppStore
+    /// 指定すると、今のルールではなくこのルールで試す(レシピの下見などに使う)。
+    var ruleOverride: String?
+    var overrideTitle: String?
     @State private var leftGB = 0.3
     @State private var unlimited = false
     @State private var unlimitedHours = 2.0
@@ -89,6 +92,12 @@ struct SimulatorView: View {
                         .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                 }
             }
+            if let t = overrideTitle {
+                Section {
+                    Label("「\(t)」を試しています(まだ今のルールには設定していません)", systemImage: "eye")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
         .textCase(nil)
         .navigationTitle("シミュレーター")
@@ -101,7 +110,7 @@ struct SimulatorView: View {
                            hoursLeft: useForecast ? hoursLeft : nil)
         let device = DeviceState(batteryLevel: Int(battery), charging: charging, full: false, lowPower: battery <= 20, network: network)
         Task {
-            result = await store.simulate(sim, device: device, trigger: trigger)
+            result = await store.simulate(sim, device: device, trigger: trigger, rule: ruleOverride)
             running = false
         }
     }

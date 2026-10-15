@@ -189,6 +189,89 @@ final class RuleEngineTests: XCTestCase {
     }
 }
 
+final class RecipeTests: XCTestCase {
+    private func ctx(left: Double?, unlimited: Bool = false, unlHours: Double? = nil, battery: Int? = 80, charging: Bool = false,
+                     network: String = "cellular", hoursLeft: Double? = 1, usedToday: Double = 100, hour: Int = 12, trigger: String = "manual") -> String {
+        let data: [String: Any] = [
+            "leftGB": left as Any? ?? NSNull(), "leftMB": left.map { $0 * 1024 } as Any? ?? NSNull(),
+            "unlimited": ["active": unlimited, "hoursLeft": unlHours as Any? ?? NSNull()] as [String: Any],
+            "toppings": [], "buckets": [],
+        ]
+        let c: [String: Any] = [
+            "mode": "simulate", "data": data,
+            "forecast": ["hoursLeft": hoursLeft as Any? ?? NSNull(), "mbPerHour": 200, "usedTodayMB": usedToday],
+            "codes": [], "budget": ["capYen": 1000, "spentYen": 0], "settings": [:],
+            "battery": ["level": battery as Any? ?? NSNull(), "charging": charging],
+            "network": network, "now": ["hour": hour, "minute": 0, "weekday": 3], "trigger": trigger,
+        ]
+        return String(data: try! JSONSerialization.data(withJSONObject: c), encoding: .utf8)!
+    }
+
+    func testCatalogLoadsAndIsLarge() {
+        let all = RecipeLibrary.all()
+        XCTAssertGreaterThanOrEqual(all.count, 250, "レシピは数百あるはず")
+        XCTAssertEqual(Set(all.map { $0.id }).count, all.count, "ID は重複しない")
+        XCTAssertFalse(RecipeLibrary.grouped().isEmpty)
+        for r in all {
+            XCTAssertFalse(r.title.isEmpty, r.id)
+            XCTAssertFalse(r.summary.isEmpty, r.id)
+        }
+    }
+
+    /// 全レシピが、構文として正しく decide を定義していること。
+    func testEveryRecipeCompilesAndChecks() {
+        let s = testSettings()
+        for r in RecipeLibrary.all() {
+            XCTAssertNil(RuleEngine.check(rule: r.rule, prelude: RuleLibrary.prelude(), settings: s), r.id)
+        }
+    }
+
+    /// 全レシピが、代表的な場面で例外を出さず正しい形の計画を返すこと(エンジンのカタログつき)。
+    func testEveryRecipeRunsWithoutError() async throws {
+        let c = mockClient("low")
+        try await login(c)
+        _ = try await c.call { try $0.catalog(force: false) }
+        let s = testSettings()
+        let scenarios = [
+            ctx(left: 0.05), ctx(left: 5), ctx(left: 0.2, network: "wifi"),
+            ctx(left: 0.2, unlimited: true, unlHours: 0.1), ctx(left: 0.2, hour: 3),
+            ctx(left: 0.2, battery: 10), ctx(left: nil), ctx(left: 0.2, hoursLeft: 0.5),
+            ctx(left: 0.2, usedToday: 5000), ctx(left: 0.2, trigger: "wifi-off"),
+        ]
+        for r in RecipeLibrary.all() {
+            for sc in scenarios {
+                let e = RuleEngine.evaluate(rule: r.rule, contextJSON: sc, prelude: RuleLibrary.prelude(), engine: c.engine, settings: s)
+                XCTAssertNil(e.error, "\(r.id): \(e.error ?? "")")
+                let node = try XCTUnwrap(e.planJSON.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }, r.id)
+                XCTAssertNotNil(node["type"] as? String, r.id)
+            }
+        }
+    }
+
+    /// いくつかのレシピが、意図どおりの判断をすること。
+    func testRepresentativeRecipeDecisions() async throws {
+        let c = mockClient("low")
+        try await login(c)
+        _ = try await c.call { try $0.catalog(force: false) }
+        let s = testSettings()
+        func decide(_ r: Recipe, _ context: String) -> [String: Any] {
+            let e = RuleEngine.evaluate(rule: r.rule, contextJSON: context, prelude: RuleLibrary.prelude(), engine: c.engine, settings: s)
+            return (e.planJSON.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }) ?? [:]
+        }
+        // 残量ラインのレシピ: 十分あれば skip、少なければ firstOf
+        let line = try XCTUnwrap(RecipeLibrary.all().first { $0.category == "残量ライン" && $0.params.low?.value == 0.5 })
+        XCTAssertEqual(decide(line, ctx(left: 5))["type"] as? String, "skip")
+        XCTAssertEqual(decide(line, ctx(left: 0.2))["type"] as? String, "firstOf")
+        XCTAssertEqual(decide(line, ctx(left: 0.2, network: "wifi"))["type"] as? String, "skip", "wifiSkip")
+        // 夜は買わない: 深夜は買い物が skip に変わる
+        let night = try XCTUnwrap(RecipeLibrary.all().first { $0.category == "夜は買わない" })
+        let nightPlan = decide(night, ctx(left: 0.05, hour: 3))
+        if nightPlan["type"] as? String == "firstOf", let items = nightPlan["items"] as? [[String: Any]] {
+            XCTAssertFalse(items.contains { $0["type"] as? String == "buy" }, "深夜は買わない")
+        }
+    }
+}
+
 final class AutomationTests: XCTestCase {
     private func service(_ client: EngineClient, settings: AppSettings, device: DeviceState, sink: @escaping ([PlannedNotification]) -> Void) -> AutomationService {
         AutomationService(.init(

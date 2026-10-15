@@ -19,6 +19,9 @@ struct RulesView: View {
                             .padding(10)
                             .background(Theme.groove.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         HStack(spacing: 10) {
+                            NavigationLink { RecipePickerView() } label: { Text("レシピ") }
+                                .buttonStyle(PrimaryButtonStyle())
+                                .accessibilityIdentifier("rules.recipes")
                             NavigationLink { TemplatePickerView() } label: { Text("テンプレート") }
                                 .buttonStyle(SecondaryButtonStyle())
                                 .accessibilityIdentifier("rules.templates")

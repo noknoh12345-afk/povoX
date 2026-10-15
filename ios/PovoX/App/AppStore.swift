@@ -32,6 +32,7 @@ final class AppStore: ObservableObject {
     @Published var onboardingDone: Bool
     @Published var rule: String
     @Published var ruleTemplateID: String?
+    @Published var ruleRecipeID: String?
 
     let services: AppServices
     private var foregroundTimer: Timer?
@@ -42,6 +43,7 @@ final class AppStore: ObservableObject {
         onboardingDone = services.settings.onboardingDone
         rule = RuleLibrary.currentSource(settings: services.settings)
         ruleTemplateID = services.settings.ruleSource == nil ? RuleLibrary.defaultID : services.settings.ruleTemplateID
+        ruleRecipeID = services.settings.ruleRecipeID
         if let t = services.launch.tab, let tab = AppTab(rawValue: t) { self.tab = tab }
         observers.append(NotificationCenter.default.addObserver(forName: .povoxDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.reload() }
@@ -233,12 +235,30 @@ final class AppStore: ObservableObject {
         }
         services.settings.ruleSource = source
         services.settings.ruleTemplateID = templateID
+        services.settings.ruleRecipeID = nil
         rule = source
         ruleTemplateID = templateID
+        ruleRecipeID = nil
+        return nil
+    }
+
+    /// レシピ(プリセット)を今のルールにする。問題があればその内容を返す。
+    func applyRecipe(_ recipe: Recipe) -> String? {
+        let source = recipe.rule
+        if let err = RuleEngine.check(rule: source, prelude: RuleLibrary.prelude(), settings: services.settings) {
+            return err
+        }
+        services.settings.ruleSource = source
+        services.settings.ruleTemplateID = nil
+        services.settings.ruleRecipeID = recipe.id
+        rule = source
+        ruleTemplateID = nil
+        ruleRecipeID = recipe.id
         return nil
     }
 
     var ruleTitle: String {
+        if let id = ruleRecipeID, let r = RecipeLibrary.recipe(id) { return r.title }
         if let id = ruleTemplateID, let t = RuleLibrary.template(id) { return t.title }
         return "カスタム"
     }
