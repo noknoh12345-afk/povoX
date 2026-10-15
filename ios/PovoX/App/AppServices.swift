@@ -47,6 +47,7 @@ final class AppServices {
     let settings: AppSettings
     let notifications = NotificationService()
     let device = DeviceMonitor()
+    let location = LocationMonitor()
     private(set) lazy var automation: AutomationService = makeAutomation()
 
     private let lock = NSLock()
@@ -75,6 +76,25 @@ final class AppServices {
         _client = makeClient(mock: settings.mockMode)
         wireNotifications()
         _ = automation
+        wireLocation()
+    }
+
+    /// 位置の変化で起こされたら残量チェックを回す(設定でオンのときだけ)。
+    private func wireLocation() {
+        guard !launch.uiTest else { return }
+        location.onWake = { [unowned self] trigger in
+            guard self.settings.locationEnabled else { return }
+            _ = await self.automation.run(trigger: trigger)
+        }
+        if settings.locationEnabled {
+            location.setEnabled(true)
+        }
+    }
+
+    /// 位置情報での起動を切り替える(権限も求める)。
+    func setLocationEnabled(_ on: Bool) {
+        settings.locationEnabled = on
+        location.setEnabled(on)
     }
 
     static func dataDirectory(uiTest: Bool) -> URL {

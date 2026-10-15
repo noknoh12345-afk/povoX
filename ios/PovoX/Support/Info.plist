@@ -42,6 +42,10 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>プリペイドカードなどに書かれたコードを読み取るために使います。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>移動したときに残量チェックを動かすために使います。位置情報は端末の外には送りません。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>「常に許可」にすると、アプリを開いていなくても移動を合図に残量チェックを動かせます。位置情報は端末の外には送らず、残量チェックのきっかけとしてだけ使います。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

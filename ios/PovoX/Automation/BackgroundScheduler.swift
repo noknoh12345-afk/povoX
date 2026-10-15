@@ -8,7 +8,9 @@ enum BackgroundScheduler {
     static let processingID = "jp.povox.check"
 
     /// アプリ起動の最初(didFinishLaunching)で1回だけ呼ぶ。
+    /// バックグラウンド更新が使えない場所(Mac・LiveContainer)では何もしない。
     static func register(run: @escaping () async -> Bool) {
+        guard Runtime.backgroundTasksAvailable else { return }
         for id in [refreshID, processingID] {
             BGTaskScheduler.shared.register(forTaskWithIdentifier: id, using: nil) { task in
                 let work = Task {
@@ -25,6 +27,7 @@ enum BackgroundScheduler {
 
     /// 次の自動チェックを予約する(前の予約は置き換える)。
     static func schedule(afterMinutes minutes: UInt32, enabled: Bool) {
+        guard Runtime.backgroundTasksAvailable else { return }
         let s = BGTaskScheduler.shared
         s.cancel(taskRequestWithIdentifier: refreshID)
         s.cancel(taskRequestWithIdentifier: processingID)

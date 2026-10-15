@@ -61,6 +61,28 @@ struct MainTabs: View {
                 .tabItem { Label("設定", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
+        .background(KeyboardShortcuts())
+    }
+}
+
+/// Mac(PlayCover など)やキーボード付き iPad 用。見えないボタンにショートカットキーを付ける。
+/// ⌘1〜5 でタブ、⌘R で残量を更新、⌘Return で今すぐチェック。
+private struct KeyboardShortcuts: View {
+    @EnvironmentObject var store: AppStore
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(AppTab.allCases.enumerated()), id: \.element) { i, tab in
+                Button("") { store.tab = tab }
+                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+            }
+            Button("") { Task { await store.refresh(force: true) } }
+                .keyboardShortcut("r", modifiers: .command)
+            Button("") { Task { _ = await store.runNow(dry: false) } }
+                .keyboardShortcut(.return, modifiers: .command)
+        }
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 }
 

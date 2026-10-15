@@ -12,6 +12,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let caveat = Runtime.caveat {
+                    Section {
+                        Label(caveat, systemImage: Runtime.onMac ? "desktopcomputer" : "square.stack.3d.up")
+                            .font(.caption)
+                    } header: {
+                        Text("この環境(\(Runtime.label))について")
+                    }
+                }
                 if let s = store.status?.settings {
                     Section {
                         modePicker("ルールによる購入", value: s.purchaseMode, id: "settings.purchaseMode") { m in
@@ -212,8 +220,25 @@ struct TriggersView: View {
                 if let next = BackgroundScheduler.nextScheduled, next > Date() {
                     LabeledContent("次の予約", value: Fmt.when(ms: Int64(next.timeIntervalSince1970 * 1000)))
                 }
+                if !Runtime.backgroundTasksAvailable {
+                    Label("この環境(\(Runtime.label))ではバックグラウンド更新は動きません", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             } footer: {
                 Text("iOS はアプリを常に動かせないので、バックグラウンド更新は iOS が都合のよいときに起こします(数時間空くこともあります)。確実に動かすには、下のショートカットのオートメーションを使ってください。設定アプリの「一般 → Appのバックグラウンド更新」で povoX をオンにしてください。")
+            }
+            Section {
+                Toggle("位置が動いたら残量チェック", isOn: Binding(
+                    get: { store.services.settings.locationEnabled },
+                    set: { v in
+                        store.services.setLocationEnabled(v)
+                        store.objectWillChange.send()
+                    }))
+                .disabled(Runtime.onMac || Runtime.inLiveContainer)
+            } header: {
+                Text("位置情報")
+            } footer: {
+                Text("「常に許可」にすると、アプリを閉じていても、移動したときや出先に着いたときに残量チェックを動かせます(ルールの ctx.trigger は location / location-arrive / location-leave)。位置情報は端末の外には送りません。\(Runtime.onMac || Runtime.inLiveContainer ? "\nこの環境では使えません。" : "")")
             }
             Section("ショートカットで確実に動かす") {
                 Text("ショートカット App →「オートメーション」→「+」→ きっかけを選ぶ →「すぐに実行」→ アクションに「povoXの自動チェック」を追加。「きっかけ」に文字を入れると ctx.trigger に入ります。")

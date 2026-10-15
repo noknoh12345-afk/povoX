@@ -36,6 +36,12 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "fg.enabled") }
     }
 
+    /// 位置が動いたときに残量チェックを動かす(「常に許可」が要る)。既定はオフ。
+    var locationEnabled: Bool {
+        get { bool("location.enabled", false) }
+        set { defaults.set(newValue, forKey: "location.enabled") }
+    }
+
     var notifyErrors: Bool {
         get { bool("notify.errors", true) }
         set { defaults.set(newValue, forKey: "notify.errors") }
