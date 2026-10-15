@@ -72,6 +72,8 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.povox.app.tests
+        # アプリのモジュールが Rust の C ヘッダーを読むので、テストからも見えるようにする
+        HEADER_SEARCH_PATHS: $(PROJECT_DIR)/Generated
   PovoXUITests:
     type: bundle.ui-testing
     platform: iOS
