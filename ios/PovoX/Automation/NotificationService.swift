@@ -83,7 +83,11 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         let info = response.notification.request.content.userInfo
         let action = response.actionIdentifier
         let pid = info["pending_id"] as? String
-        onLog?("通知の操作を受け取りました: \(action)\(pid.map { "(\($0))" } ?? "")")
+        switch action {
+        case NotificationService.executeAction: onLog?("通知の「実行する」が押されました")
+        case NotificationService.dismissAction: onLog?("通知の「やめる」が押されました")
+        default: break
+        }
         let done = { DispatchQueue.main.async { completionHandler() } }
         switch action {
         case NotificationService.executeAction:
