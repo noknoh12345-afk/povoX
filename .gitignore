@@ -6,3 +6,4 @@ ios/Payload/
 ios/*.ipa
 ci/
 .DS_Store
+ios/RustLib/

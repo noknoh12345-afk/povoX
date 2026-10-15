@@ -1,14 +1,17 @@
 [package]
 name = "povo-auto"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "povoX(iOS)の中身: povo-core を使った残量取得・ルールの計画実行・安全装置つきエンジン(非公式)"
 publish = false
 
 [lib]
 name = "povo_auto"
-# staticlib: iOS アプリに静的リンク / cdylib: Swift の型を作る(uniffi-bindgen)ため / lib: テスト
-crate-type = ["staticlib", "cdylib", "lib"]
+# staticlib: iOS アプリに静的リンク / lib: テスト。
+# cdylib はここに入れない(入れると iOS 向けにも .dylib ができ、アプリがビルドした Mac 上の
+# ファイルを参照して実機で起動直後に落ちる)。Swift の型を作るときだけ
+# `cargo rustc --lib --crate-type cdylib` で作る。
+crate-type = ["staticlib", "lib"]
 
 [[bin]]
 name = "uniffi-bindgen"

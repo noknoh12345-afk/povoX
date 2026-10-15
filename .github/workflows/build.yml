@@ -42,17 +42,24 @@ jobs:
       - name: Swift bindings (UniFFI)
         working-directory: core
         run: |
-          cargo build --lib
-          cargo run --bin uniffi-bindgen -- generate --library target/debug/libpovo_auto.dylib \
+          # Swift の型を作るときだけ、この Mac 向けの .dylib を作って読ませる(アプリには入れない)
+          cargo build --bin uniffi-bindgen
+          cargo rustc --lib --crate-type cdylib
+          ./target/debug/uniffi-bindgen generate --library target/debug/libpovo_auto.dylib \
             --language swift --out-dir ../ios/Generated --crate povo_auto
           ls -la ../ios/Generated
 
-      - name: Rust for iOS (simulator debug + device release)
+      - name: Rust for iOS (static libraries, release)
         working-directory: core
         run: |
-          cargo build --lib --target aarch64-apple-ios-sim
-          cargo build --lib --release --target aarch64-apple-ios
-          ls -lh target/aarch64-apple-ios-sim/debug/libpovo_auto.a target/aarch64-apple-ios/release/libpovo_auto.a
+          # アプリに組み込む静的ライブラリ(.a)だけを作る。iOS 向けの .dylib は作らない。
+          # 実機向けは、静的リンクのときに追加で要るシステムのライブラリも表示する。
+          cargo rustc --lib --release --target aarch64-apple-ios --crate-type staticlib -- --print native-static-libs
+          cargo rustc --lib --release --target aarch64-apple-ios-sim --crate-type staticlib
+          mkdir -p ../ios/RustLib/iphoneos ../ios/RustLib/iphonesimulator
+          cp target/aarch64-apple-ios/release/libpovo_auto.a ../ios/RustLib/iphoneos/
+          cp target/aarch64-apple-ios-sim/release/libpovo_auto.a ../ios/RustLib/iphonesimulator/
+          ls -lh ../ios/RustLib/*/libpovo_auto.a
 
       - name: Generate Xcode project
         working-directory: ios
@@ -120,6 +127,14 @@ jobs:
           grep -E "error:|\*\* BUILD" ../ci/build-device.log | tail -60 || true
           exit $status
 
+      - name: Check device app (no files from the build Mac)
+        id: macho_device
+        run: |
+          set -o pipefail
+          # 実機で起動直後に落ちる原因(ビルドした Mac 上のライブラリを読み込む)をここで止める
+          python3 tools/check-macho.py --platform ios --expect-plugins 1 \
+            ios/build/device/Build/Products/Release-iphoneos/PovoX.app | tee ci/macho-device.txt
+
       - name: Package IPAs
         working-directory: ios
         run: |
@@ -148,6 +163,61 @@ jobs:
           zip -qry povoX-nowidget.ipa Payload
           ls -lh *.ipa
 
+      - name: Check IPAs
+        id: macho_ipa
+        run: |
+          set -o pipefail
+          python3 tools/check-macho.py --platform ios --expect-plugins 1 ios/povoX.ipa | tee ci/macho-ipa.txt
+          python3 tools/check-macho.py --platform ios --expect-plugins 0 ios/povoX-nowidget.ipa | tee -a ci/macho-ipa.txt
+
+      - name: Launch Release build in simulator (build files hidden)
+        id: smoke
+        working-directory: ios
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          # 実機に入れるのと同じリリース構成でシミュレータ版を作り、テスト用の起動オプションなしで起動する。
+          # 起動の前にビルドに使ったファイル(core/target と RustLib)を隠し、アプリがそれに頼っていないことも確かめる。
+          set +e
+          xcodebuild build -project PovoX.xcodeproj -scheme PovoX -configuration Release \
+            -sdk iphonesimulator -destination "id=$UDID" -derivedDataPath build/simrel \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGN_IDENTITY="-" > ../ci/build-simrel.log 2>&1
+          status=$?
+          grep -E "error:|\*\* BUILD" ../ci/build-simrel.log | tail -40
+          [ $status -eq 0 ] || exit $status
+          set -e -o pipefail
+          APP=build/simrel/Build/Products/Release-iphonesimulator/PovoX.app
+          python3 ../tools/check-macho.py --platform iossim --expect-plugins 1 "$APP" | tee ../ci/macho-simrel.txt
+          restore() {
+            [ -d ../core/target.hidden ] && mv ../core/target.hidden ../core/target
+            [ -d RustLib.hidden ] && mv RustLib.hidden RustLib
+            return 0
+          }
+          trap restore EXIT
+          mv ../core/target ../core/target.hidden
+          mv RustLib RustLib.hidden
+          xcrun simctl terminate "$UDID" jp.povox.app 2>/dev/null || true
+          xcrun simctl uninstall "$UDID" jp.povox.app 2>/dev/null || true
+          marker=$(mktemp); sleep 1
+          xcrun simctl install "$UDID" "$APP"
+          out=$(xcrun simctl launch "$UDID" jp.povox.app 2>&1) || { echo "$out"; echo "::error::起動できませんでした"; exit 1; }
+          echo "$out"
+          pid=${out##*: }
+          sleep 12
+          alive=0
+          if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then alive=1; fi
+          mkdir -p ../ci/shots ../ci/crash
+          xcrun simctl io "$UDID" screenshot ../ci/shots/release-launch.png || true
+          crashes=$(find ~/Library/Logs/DiagnosticReports -newer "$marker" -iname "*PovoX*" -type f 2>/dev/null || true)
+          xcrun simctl terminate "$UDID" jp.povox.app 2>/dev/null || true
+          echo "pid=$pid alive=$alive"
+          if [ "$alive" != 1 ] || [ -n "$crashes" ]; then
+            for f in $crashes; do cp "$f" ../ci/crash/; head -80 "$f"; done
+            echo "::error::リリース構成のアプリが起動直後に終了しました"
+            exit 1
+          fi
+          echo "リリース構成のアプリは 12 秒たっても動いています"
+
       - name: Collect test report
         if: always()
         run: |
@@ -166,6 +236,7 @@ jobs:
           fi
           ls -la ci/crash || true
           grep -E "error:" ci/build-device.log > ci/build-errors.txt 2>/dev/null || true
+          grep -E "error:" ci/build-simrel.log >> ci/build-errors.txt 2>/dev/null || true
           ls -la ci ci/shots 2>/dev/null | head -80
 
       - name: Publish screenshots and logs (ci-artifacts branch)
@@ -177,8 +248,9 @@ jobs:
           cp -R ci/crash /tmp/ci-out/ 2>/dev/null || true
           tail -c 3000000 ci/test.log > /tmp/ci-out/test.log 2>/dev/null || true
           tail -c 2000000 ci/build-device.log > /tmp/ci-out/build-device.log 2>/dev/null || true
+          tail -c 1000000 ci/build-simrel.log > /tmp/ci-out/build-simrel.log 2>/dev/null || true
           echo "${GITHUB_SHA}" > /tmp/ci-out/SHA
-          echo "test=${{ steps.test.outcome }} device=${{ steps.device.outcome }}" > /tmp/ci-out/STATUS
+          echo "test=${{ steps.test.outcome }} device=${{ steps.device.outcome }} macho=${{ steps.macho_device.outcome }}/${{ steps.macho_ipa.outcome }} release-launch=${{ steps.smoke.outcome }}" > /tmp/ci-out/STATUS
           cd /tmp/ci-out
           git init -q
           git config user.name "github-actions"
@@ -212,6 +284,7 @@ jobs:
           - povoX.ipa: ウィジェット付き
           - povoX-nowidget.ipa: ウィジェットなし(署名ツールが App Group / 拡張機能に対応していないとき)
           シミュレータのテスト: ${{ steps.test.outcome }}
+          検査: アプリが読み込むライブラリはすべて iOS かアプリの中のもの / リリース構成での起動 OK
           commit ${GITHUB_SHA::7}"
           FLAGS="--latest"
           if [ "${{ steps.test.outcome }}" != "success" ]; then FLAGS="--prerelease"; fi
