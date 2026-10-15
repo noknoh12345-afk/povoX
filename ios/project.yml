@@ -35,7 +35,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.povox.app
-        PRODUCT_NAME: povoX
+        PRODUCT_NAME: PovoX
         INFOPLIST_FILE: PovoX/Support/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: PovoX/Support/PovoX.entitlements

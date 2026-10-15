@@ -1,5 +1,5 @@
 import XCTest
-@testable import povoX
+@testable import PovoX
 
 /// テスト用の保存先(キーチェーンを汚さない)。
 final class MemoryStore: SessionStore {
