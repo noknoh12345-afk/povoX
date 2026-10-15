@@ -159,6 +159,7 @@ fn confirm_mode_queues_then_executes_on_confirm() {
     // 記録の結果も「実行」に変わる
     let run_rec = e.runs(10).into_iter().find(|x| x.id == r.id).unwrap();
     assert_eq!(run_rec.outcomes[0].status, OutcomeStatus::Done);
+    assert!(run_rec.summary.contains("購入しました"), "{}", run_rec.summary);
     // 2回目の確認はできない
     assert!(e.confirm_pending(&pid).is_err());
     // 使い放題が反映される

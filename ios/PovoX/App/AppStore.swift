@@ -250,6 +250,9 @@ final class AppStore: ObservableObject {
         defer { busy.remove("run") }
         let r = await services.automation.run(trigger: dry ? "試運転" : "manual", mode: dry ? .dry : .live)
         await reload()
+        if let r, !dry {
+            toast = r.error.map { "エラー: \($0)" } ?? r.summary
+        }
         if r == nil {
             if status?.halted != nil {
                 alert = AlertMessage(title: "通信を止めています", message: "安全のため povo への通信を止めています。原因を確認してから「通信を再開」を押してください。")

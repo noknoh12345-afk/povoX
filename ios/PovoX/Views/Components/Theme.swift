@@ -187,7 +187,17 @@ extension ActionMode {
     }
 }
 
-extension RunRecord: Identifiable {}
+extension RunRecord: Identifiable {
+    /// 一覧に出す主な結果(購入・コードの実行/確認待ち/試運転/失敗 → 通知 → 最初の結果)。
+    var mainOutcome: ActionOutcome? {
+        outcomes.first { ($0.kind == .buy || $0.kind == .applyCode) && [.done, .queued, .dryRun, .failed, .simulated].contains($0.status) }
+            ?? outcomes.first { $0.status == .notified }
+            ?? outcomes.first
+    }
+
+    var iconName: String { error != nil ? "exclamationmark.triangle.fill" : (mainOutcome?.status.icon ?? "minus.circle") }
+    var iconTint: Color { error != nil ? Theme.danger : (mainOutcome?.status.tint ?? .secondary) }
+}
 extension PendingAction: Identifiable {}
 extension CodeEntry: Identifiable {}
 extension Product: Identifiable {

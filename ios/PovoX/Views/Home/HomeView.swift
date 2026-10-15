@@ -191,7 +191,7 @@ struct UsageChartCard: View {
                 Chart {
                     ForEach(points) { p in
                         AreaMark(x: .value("時刻", p.date), y: .value("GB", p.gb))
-                            .foregroundStyle(LinearGradient(colors: [Theme.yellow.opacity(0.55), Theme.yellow.opacity(0.05)],
+                            .foregroundStyle(LinearGradient(colors: [Theme.yellow.opacity(0.45), Theme.yellow.opacity(0.0)],
                                                             startPoint: .top, endPoint: .bottom))
                             .interpolationMethod(.monotone)
                         LineMark(x: .value("時刻", p.date), y: .value("GB", p.gb))
@@ -315,9 +315,8 @@ struct LastRunCard: View {
             Card("前回の自動チェック", systemImage: "clock.arrow.circlepath",
                  accessory: AnyView(Text(Fmt.when(ms: run.startedMs)).font(.caption).foregroundStyle(.secondary))) {
                 HStack(alignment: .top, spacing: 10) {
-                    let st = run.outcomes.first { $0.kind != .skip }?.status ?? .skipped
-                    Image(systemName: run.error != nil ? "exclamationmark.triangle.fill" : st.icon)
-                        .foregroundStyle(run.error != nil ? Theme.danger : st.tint)
+                    Image(systemName: run.iconName)
+                        .foregroundStyle(run.iconTint)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(run.summary).font(.subheadline).foregroundStyle(.primary).multilineTextAlignment(.leading)
                         Text(RunText.trigger(run.trigger)).font(.caption).foregroundStyle(.secondary)

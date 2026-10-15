@@ -80,6 +80,7 @@ struct SettingsView: View {
                     Text("非公式アプリです。KDDI・povo・Circles.life とは関係ありません。通信部分は公開ライブラリ povo-core(MIT)を使っています。")
                 }
             }
+            .textCase(nil)
             .navigationTitle("設定")
             .task { notifStatus = await store.services.notifications.authorizationStatus() }
             .alert("ログアウトしますか?", isPresented: $confirmLogout) {
@@ -174,6 +175,7 @@ struct SafetyView: View {
                 }
             }
         }
+        .textCase(nil)
         .navigationTitle("安全装置")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -227,6 +229,7 @@ struct TriggersView: View {
                     .font(.callout)
             }
         }
+        .textCase(nil)
         .navigationTitle("きっかけ")
         .navigationBarTitleDisplayMode(.inline)
     }

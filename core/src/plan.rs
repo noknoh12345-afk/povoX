@@ -506,6 +506,7 @@ impl Engine {
                 o.status = status;
                 o.message = message.to_string();
             }
+            run.summary = summarize(&run.outcomes);
         }
     }
 

@@ -22,6 +22,7 @@ struct CodesView: View {
                                 .font(.callout).foregroundStyle(.secondary)
                             Button { showAdd = true } label: { Label("コードを登録", systemImage: "plus") }
                                 .buttonStyle(SecondaryButtonStyle())
+                                .accessibilityIdentifier("codes.empty.add")
                         }
                         .padding(.vertical, 6)
                     }
@@ -59,6 +60,7 @@ struct CodesView: View {
                     }
                 }
             }
+            .textCase(nil)
             .navigationTitle("コード")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

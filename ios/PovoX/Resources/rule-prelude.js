@@ -91,7 +91,15 @@ function __povox_run(ctxJSON) {
   const ctx = JSON.parse(ctxJSON);
   let catalogCache = null;
   ctx.catalog = function (opts) {
-    if (catalogCache === null || (opts && opts.force)) catalogCache = __call("catalog", { mode: ctx.mode });
+    if (catalogCache === null || (opts && opts.force)) {
+      try {
+        catalogCache = __call("catalog", { mode: ctx.mode });
+      } catch (e) {
+        // 一覧を読めなくてもルールは止めない(通知などの次の手に進めるように)
+        log("トッピング一覧を読めませんでした: " + e.message);
+        catalogCache = [];
+      }
+    }
     return catalogCache;
   };
   ctx.state = state;

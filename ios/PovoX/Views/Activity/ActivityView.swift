@@ -14,15 +14,13 @@ struct ActivityView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(p.label).font(.headline)
                                 Text(p.detail).font(.caption).foregroundStyle(.secondary)
-                                HStack {
+                                Text("\(Fmt.when(ms: p.expiresMs)) まで有効").font(.caption2).foregroundStyle(.secondary)
+                                HStack(spacing: 10) {
                                     Button("やめる") { Task { await store.dismiss(p) } }
-                                        .buttonStyle(.bordered)
+                                        .buttonStyle(SecondaryButtonStyle())
                                     Button("実行する") { Task { await store.confirm(p) } }
-                                        .buttonStyle(.borderedProminent)
-                                        .tint(.primary)
+                                        .buttonStyle(PrimaryButtonStyle())
                                         .accessibilityIdentifier("activity.execute")
-                                    Spacer()
-                                    Text("\(Fmt.when(ms: p.expiresMs))まで").font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -45,6 +43,7 @@ struct ActivityView: View {
                 default: logs
                 }
             }
+            .textCase(nil)
             .navigationTitle("履歴")
             .refreshable { await store.reload() }
             .toolbar {
@@ -147,19 +146,13 @@ struct ActivityView: View {
 struct RunRow: View {
     let run: RunRecord
 
-    private var main: ActionOutcome? {
-        run.outcomes.first { $0.kind == .buy || $0.kind == .applyCode }.flatMap { o in
-            [.done, .queued, .dryRun, .failed, .simulated].contains(o.status) ? o : nil
-        } ?? run.outcomes.first { $0.status == .notified }
-    }
-
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
-                Circle().fill((run.error != nil ? Theme.danger : (main?.status.tint ?? .secondary)).opacity(0.15)).frame(width: 34, height: 34)
-                Image(systemName: run.error != nil ? "exclamationmark.triangle.fill" : (main?.status.icon ?? "minus"))
+                Circle().fill(run.iconTint.opacity(0.15)).frame(width: 34, height: 34)
+                Image(systemName: run.iconName)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(run.error != nil ? Theme.danger : (main?.status.tint ?? .secondary))
+                    .foregroundStyle(run.iconTint)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(run.summary).font(.subheadline).lineLimit(2)

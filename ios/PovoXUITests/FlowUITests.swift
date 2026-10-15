@@ -127,8 +127,7 @@ final class FlowUITests: XCTestCase {
 
         tab(app, "コード")
         shot(app, "17-codes-empty")
-        app.buttons["codes.add"].tap()
-        app.buttons["まとめて登録"].tap()
+        app.buttons["codes.empty.add"].tap()
         let text = wait(app.textViews["codes.text"])
         text.tap()
         text.typeText("MOCKOK1 1gb 7日間\nMOCKUNL1H 1h 使い放題\nMOCKOK2")

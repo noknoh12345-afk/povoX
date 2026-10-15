@@ -55,9 +55,9 @@ struct SimulatorView: View {
                     Text("圏外").tag("none")
                 }
                 Picker("きっかけ", selection: $trigger) {
-                    Text("バックグラウンド更新").tag("background")
+                    Text("裏で自動").tag("background")
                     Text("ショートカット").tag("shortcut")
-                    Text("battery-low").tag("battery-low")
+                    Text("電池低下").tag("battery-low")
                     Text("手動").tag("manual")
                 }
             } header: {
@@ -90,6 +90,7 @@ struct SimulatorView: View {
                 }
             }
         }
+        .textCase(nil)
         .navigationTitle("シミュレーター")
         .navigationBarTitleDisplayMode(.inline)
     }

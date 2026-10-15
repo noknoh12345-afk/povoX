@@ -63,6 +63,7 @@ struct ShopView: View {
                 }
             }
         }
+        .textCase(nil)
         .navigationTitle("トッピング")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await store.loadCatalog(force: true) }
