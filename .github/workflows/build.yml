@@ -137,8 +137,14 @@ jobs:
           zip -qry povoX.ipa Payload
           # ウィジェットなし版(App Group が使えない署名方法向け): 拡張も App Group の権限も持たない
           rm -rf Payload/PovoX.app/PlugIns
-          codesign -f -s - Payload/PovoX.app
-          codesign -d --entitlements - Payload/PovoX.app 2>/dev/null | head -5 || true
+          # --entitlements を付けないと前の権限が残るので、空の権限で署名し直す
+          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0"><dict/></plist>' > /tmp/empty.entitlements
+          codesign -f -s - --entitlements /tmp/empty.entitlements Payload/PovoX.app
+          if codesign -d --entitlements - Payload/PovoX.app 2>/dev/null | grep -q application-groups; then
+            echo "::error::ウィジェットなし版に App Group の権限が残っています"; exit 1
+          fi
           zip -qry povoX-nowidget.ipa Payload
           ls -lh *.ipa
 
