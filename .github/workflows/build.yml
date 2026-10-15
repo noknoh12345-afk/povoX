@@ -150,6 +150,14 @@ jobs:
             xcrun xcresulttool get test-results tests --path ci/TestResults.xcresult > ci/test-tests.json 2>/dev/null || true
           fi
           grep -E "error:|failed|Test Case|XCTAssert|見つからない" ci/test.log > ci/test-key-lines.txt 2>/dev/null || true
+          # シミュレータでアプリが落ちたときのクラッシュレポート
+          mkdir -p ci/crash
+          find ~/Library/Logs/DiagnosticReports -newer ios/project.yml \( -iname "*PovoX*" -o -iname "*povox*" \) -type f -exec cp {} ci/crash/ \; 2>/dev/null || true
+          if [ -d ci/TestResults.xcresult ]; then
+            xcrun xcresulttool export attachments --path ci/TestResults.xcresult --output-path ci/xcattach > /dev/null 2>&1 || true
+            find ci/xcattach -type f \( -iname "*crash*" -o -iname "*.ips" -o -iname "*.txt" \) -exec cp {} ci/crash/ \; 2>/dev/null || true
+          fi
+          ls -la ci/crash || true
           grep -E "error:" ci/build-device.log > ci/build-errors.txt 2>/dev/null || true
           ls -la ci ci/shots 2>/dev/null | head -80
 
@@ -159,6 +167,7 @@ jobs:
           rm -rf /tmp/ci-out && mkdir -p /tmp/ci-out
           cp -R ci/shots /tmp/ci-out/ 2>/dev/null || true
           cp ci/*.txt ci/*.json /tmp/ci-out/ 2>/dev/null || true
+          cp -R ci/crash /tmp/ci-out/ 2>/dev/null || true
           tail -c 3000000 ci/test.log > /tmp/ci-out/test.log 2>/dev/null || true
           tail -c 2000000 ci/build-device.log > /tmp/ci-out/build-device.log 2>/dev/null || true
           echo "${GITHUB_SHA}" > /tmp/ci-out/SHA

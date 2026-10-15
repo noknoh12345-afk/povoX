@@ -68,24 +68,45 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     }
 
     // MARK: - UNUserNotificationCenterDelegate
+    //
+    // async 版の delegate を使うと、システムの完了ハンドラが画面以外のスレッドから呼ばれ、
+    // UIKit の「メインスレッドで呼ぶこと」の検査でアプリが落ちる(シミュレータの画面テストで見つけた)。
+    // 完了ハンドラ版を使い、処理が終わってからメインスレッドで呼ぶ。
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
+        let action = response.actionIdentifier
         let pid = info["pending_id"] as? String
-        onLog?("通知の操作を受け取りました: \(response.actionIdentifier)\(pid.map { "(\($0))" } ?? "")")
-        switch response.actionIdentifier {
+        onLog?("通知の操作を受け取りました: \(action)\(pid.map { "(\($0))" } ?? "")")
+        let done = { DispatchQueue.main.async { completionHandler() } }
+        switch action {
         case NotificationService.executeAction:
-            guard let pid, let outcome = await onConfirm?(pid) else { return }
-            await post([NotificationPlanner.plan(forConfirmed: outcome)])
+            guard let pid, let confirm = onConfirm else { return done() }
+            // 購入・適用が終わるまで完了ハンドラを呼ばない(その間 iOS がアプリを動かしておく)
+            Task {
+                if let outcome = await confirm(pid) {
+                    await self.post([NotificationPlanner.plan(forConfirmed: outcome)])
+                }
+                done()
+            }
         case NotificationService.dismissAction:
-            if let pid { await onDismiss?(pid) }
+            guard let pid, let dismiss = onDismiss else { return done() }
+            Task {
+                await dismiss(pid)
+                done()
+            }
         default:
             let handler = onOpen
-            await MainActor.run { handler?(info) }
+            DispatchQueue.main.async {
+                handler?(info)
+                completionHandler()
+            }
         }
     }
 }
