@@ -138,6 +138,9 @@ final class AppServices {
             await self.client.value { $0.dismissPending(id: id) }
             await self.afterChange(summary: nil)
         }
+        notifications.onLog = { [unowned self] text in
+            self.client.engine.log(level: .info, message: text)
+        }
         notifications.onOpen = { info in
             NotificationCenter.default.post(name: .povoxOpenRoute, object: nil, userInfo: info)
         }

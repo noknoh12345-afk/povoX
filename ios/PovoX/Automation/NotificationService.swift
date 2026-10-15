@@ -12,6 +12,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     var onConfirm: ((String) async -> ActionOutcome?)?
     var onDismiss: ((String) async -> Void)?
     var onOpen: (([AnyHashable: Any]) -> Void)?
+    /// 記録用(通知の操作を受け取ったことをログに残す)。
+    var onLog: ((String) -> Void)?
     /// UI テストでは通知を出さない。
     var enabled = true
 
@@ -74,6 +76,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         let pid = info["pending_id"] as? String
+        onLog?("通知の操作を受け取りました: \(response.actionIdentifier)\(pid.map { "(\($0))" } ?? "")")
         switch response.actionIdentifier {
         case NotificationService.executeAction:
             guard let pid, let outcome = await onConfirm?(pid) else { return }

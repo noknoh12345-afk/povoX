@@ -185,7 +185,14 @@ final class FlowUITests: XCTestCase {
         shot(app, "42-notification-actions")
         execute.tap()
         // アプリ側: 確認待ちが消え、使い放題中になる
-        XCTAssertTrue(app.staticTexts["使い放題中"].waitForExistence(timeout: 25), "通知から実行されていない")
+        if !app.staticTexts["使い放題中"].waitForExistence(timeout: 25) {
+            shot(app, "45-debug-home")
+            tab(app, "履歴")
+            app.buttons["ログ"].tap()
+            shot(app, "46-debug-log")
+            XCTFail("通知から実行されていない")
+            return
+        }
         XCTAssertFalse(app.buttons["pending.execute"].exists)
         shot(app, "43-after-notification")
         // 結果の通知(「購入しました」)
