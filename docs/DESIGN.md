@@ -85,6 +85,32 @@ povo-web から引き継いだもの:
 - 画面テストで見つけて直したもの: 通知の「実行する」でアプリが落ちる(async 版の通知 delegate が完了ハンドラを画面以外のスレッドから呼ぶ)、確認後も記録の要約が「確認待ち」のまま、ダークモードで白地に白文字のボタン、履歴のアイコンの選び方、見出しの大文字化。
 - 実機で見つかったもの(build-9・10): 起動した瞬間に落ちる。`crate-type` に `cdylib` が入っていたため iOS 向けにも .dylib ができ、`-lpovo_auto` がそれを選んで、アプリが CI の Mac 上のパス(`/Users/runner/...`)のライブラリを読み込む作りになっていた。シミュレータはその Mac の上で動くので見つからなかった。
 
+## レシピ(選ぶだけのプリセット)
+
+- ルールを書かずに選べる 266 個のプリセット。レシピは**パラメータだけ**を持ち(`Resources/recipes.json`、作成は `tools/gen-recipes.py`)、実際のルール(`decide(ctx)`)は `RecipeCompiler` がパラメータから組み立てる。1つのレシピ源から大量の組み合わせを生むので、文面と挙動がぶれない。
+- 安全装置はこれまでどおりエンジン側。レシピは「何をするか」だけを決める。
+- 検証: 全 266 個が CI の単体テストで「構文 OK」かつ「10 場面で例外なく正しい計画を返す」ことを確認(ローカルでも Node で 266×16=4256 評価が全成功)。
+
+## 動く場所の違い(iPhone / Mac / LiveContainer)
+
+- `Runtime` が Mac(PlayCover など)・LiveContainer・iPhone を見分ける。機能は**名前で決め打ちせず可否で出し分ける**(App Group が使えるか、バックグラウンド更新が使えるか)。
+- Mac・LiveContainer ではバックグラウンド更新・位置情報・ウィジェットが動かないので、`BackgroundScheduler` は no-op にし、画面に注意を出し、`povoX-nowidget.ipa` を使う。
+- Mac はキーボードで操作(⌘1〜5 / ⌘R / ⌘Return)。
+
+## 位置情報での起動
+
+- `LocationMonitor` が significant-location-change と visit 監視を使い、移動・立ち寄りを合図に自動チェックを回す(アプリが閉じていても起こされる)。位置の値は使わず povo にも送らない。
+- Core Location は追加の署名(entitlement)が要らないので、無料 Apple ID でも使える。`allowsBackgroundLocationUpdates` は false のまま(連続測位はしない)。
+
+## 無料 Apple ID の制約(正直に出す)
+
+- VPN／ネットワーク拡張・プッシュ通知は無料 Apple ID では署名できない。よって「ほかのアプリの通信を止める」はこの端末ではできない。代わりに iOS 設定への近道と「知らせるだけ」レシピを案内する。
+- povo のローミング等の変更は料金に直結するため povoX からは自動で変えず、公式アプリ/サイトへ誘導する。
+
+## 本家の閲覧機能(請求・紹介・プロフィール)
+
+- 公式アプリ 1.69.0 の解析で差分を把握。足りなかった閲覧系を povo-core 経由で追加:`bills`/`bill_pdf`・`referral`・`account_profile`。すべて読み取りで、お金は動かさない。
+
 ## Rust のエンジンの組み込み方
 
 - `core` は `staticlib`(アプリ用)と `lib`(テスト用)だけを作る。iOS 向けの .dylib は作らない。
