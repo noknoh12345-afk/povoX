@@ -36,7 +36,7 @@ struct SimulatorView: View {
                     Stepper("このペースで \(Fmt.duration(hours: hoursLeft))", value: $hoursLeft, in: 0.5...72, step: 0.5)
                 }
             } header: {
-                Text("povo の状態(仮)")
+                Text("povo の状態(仮)").textCase(nil)
             }
             Section {
                 VStack(alignment: .leading) {

@@ -163,6 +163,39 @@ final class FlowUITests: XCTestCase {
         }
     }
 
+    // 5. 通知の「実行する」ボタン(ロック画面・バナーから実行する流れ)
+    func test5_NotificationConfirm() {
+        let app = launch(["-skipOnboarding", "-uitestNotifications", "-mockScenario", "low", "-deviceBattery", "15", "-deviceNetwork", "cellular"])
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["許可", "Allow"])).firstMatch
+        if allow.waitForExistence(timeout: 10) {
+            shot(app, "40-notification-permission")
+            allow.tap()
+        }
+        login(app)
+        app.buttons["home.runNow"].tap()
+        // 確認の通知(アプリを開いていてもバナーで出る)
+        let banner = springboard.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "購入しますか")).firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 20), "確認の通知が出ない")
+        shot(app, "41-notification-banner")
+        banner.press(forDuration: 1.5)
+        let execute = springboard.buttons["実行する"]
+        XCTAssertTrue(execute.waitForExistence(timeout: 10), "通知のボタンが出ない")
+        shot(app, "42-notification-actions")
+        execute.tap()
+        // アプリ側: 確認待ちが消え、使い放題中になる
+        XCTAssertTrue(app.staticTexts["使い放題中"].waitForExistence(timeout: 25), "通知から実行されていない")
+        XCTAssertFalse(app.buttons["pending.execute"].exists)
+        shot(app, "43-after-notification")
+        // 結果の通知(「購入しました」)
+        let done = springboard.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "購入しました")).firstMatch
+        if done.waitForExistence(timeout: 10) {
+            shot(app, "44-result-notification")
+        }
+    }
+
     // 4. ダークモード
     func test4_DarkMode() {
         let app = launch(["-skipOnboarding", "-forceDark", "-mockScenario", "low", "-deviceBattery", "60"])

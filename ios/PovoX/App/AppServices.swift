@@ -13,6 +13,8 @@ struct LaunchOptions {
     var skipOnboarding = false
     var tab: String?
     var device: DeviceState?
+    /// UI テストでも通知を使う(通知のボタンの確認用)。
+    var uiTestNotifications = false
 
     static let current: LaunchOptions = {
         let args = ProcessInfo.processInfo.arguments
@@ -28,6 +30,7 @@ struct LaunchOptions {
         o.forceLight = args.contains("-forceLight")
         o.skipOnboarding = args.contains("-skipOnboarding")
         o.tab = value("-tab")
+        o.uiTestNotifications = args.contains("-uitestNotifications")
         if let b = value("-deviceBattery") {
             o.device = DeviceState(batteryLevel: Int(b), charging: args.contains("-deviceCharging"), full: false, lowPower: false,
                                    network: value("-deviceNetwork") ?? "cellular")
@@ -63,7 +66,7 @@ final class AppServices {
             settings.mockMode = true
             if launch.skipOnboarding { settings.onboardingDone = true }
             if launch.reset { try? FileManager.default.removeItem(at: AppServices.dataDirectory(uiTest: true)) }
-            notifications.enabled = false
+            notifications.enabled = launch.uiTestNotifications
         } else {
             settings = AppSettings(defaults: .standard)
         }
@@ -125,6 +128,9 @@ final class AppServices {
         notifications.onConfirm = { [unowned self] id in
             let c = self.client
             let out = try? await c.call { try $0.confirmPending(id: id) }
+            if out?.status == .done {
+                _ = try? await c.call { try $0.snapshot(force: true) }
+            }
             await self.afterChange(summary: out.map { "\($0.label): \($0.message)" })
             return out
         }

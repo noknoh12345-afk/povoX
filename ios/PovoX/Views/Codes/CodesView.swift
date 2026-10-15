@@ -163,6 +163,7 @@ struct AddCodesSheet: View {
                     TextEditor(text: $text)
                         .font(.body.monospaced())
                         .frame(minHeight: 160)
+                        .keyboardType(.asciiCapable)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.characters)
                         .accessibilityIdentifier("codes.text")
@@ -225,6 +226,7 @@ struct ManualCodeSheet: View {
                 Section {
                     TextField("コード", text: $code)
                         .font(.body.monospaced())
+                        .keyboardType(.asciiCapable)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                     TextField("確認のため「利用する」と入力", text: $confirm)
@@ -268,6 +270,7 @@ struct EditCodeSheet: View {
             Form {
                 Section(code.masked) {
                     TextField("タグ(例: 1gb, 24h)", text: $tag)
+                        .keyboardType(.asciiCapable)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     TextField("メモ", text: $note)

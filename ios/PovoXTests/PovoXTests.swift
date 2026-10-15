@@ -271,3 +271,31 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(Fmt.yen(2700), "2,700円")
     }
 }
+
+final class IntentTests: XCTestCase {
+    func testShortcutIntentsRunInApp() async throws {
+        let services = AppServices.shared
+        services.setMock(true)
+        let c = services.client
+        if !(await c.value { $0.status() }.loggedIn) {
+            try await login(c)
+        }
+        // 残量
+        let remaining = RemainingDataIntent()
+        _ = try await remaining.perform()
+        // 自動チェック(きっかけの文字はルールの ctx.trigger に入る)
+        var check = RunCheckIntent()
+        check.trigger = "battery-low"
+        _ = try await check.perform()
+        let runs = await c.value { $0.runs(limit: 5) }
+        XCTAssertEqual(runs.first?.trigger, "battery-low")
+        // 購入のしかたを切り替える
+        var mode = SetPurchaseModeIntent()
+        mode.mode = .off
+        _ = try await mode.perform()
+        let after = await c.value { $0.settings() }
+        XCTAssertEqual(after.purchaseMode, .off)
+        mode.mode = .confirm
+        _ = try await mode.perform()
+    }
+}

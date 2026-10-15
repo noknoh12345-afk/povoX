@@ -50,6 +50,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             }
         }
         services.notifications.register()
+        if services.launch.uiTestNotifications {
+            Task { _ = await services.notifications.requestAuthorization() }
+        }
         return true
     }
 }

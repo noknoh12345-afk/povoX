@@ -238,11 +238,13 @@ struct TriggersView: View {
 struct AboutView: View {
     var body: some View {
         List {
-            Section("弾かれないための作り(povo-web と同じ)") {
+            Section {
                 Text("送る値は povo-android と同じ(X-App-Version 1.69.0-JP、User-Agent okhttp/4.12.0)。端末IDはログイン時に1回だけ作り、トークンと組で保存します。")
                 Text("トークンの更新は期限切れ後だけ。povo への通信は常に1本ずつで、自動リトライはしません。")
                 Text("403 や PIN 要求が返ったら、「通信を再開」を押すまで自動チェックも含めてすべて止めます。povo が待機時刻を返したら、その時刻まで送りません。")
                 Text("認証コードの送信は60秒に1回まで、入れ直しは3回まで。")
+            } header: {
+                Text("弾かれないための作り(povo-web と同じ)").textCase(nil)
             }
             Section("自動化の作り") {
                 Text("ルールは「何をするか」を返すだけで、povo へ送るのはアプリの中のエンジン(Rust)だけです。購入・コードは送る前に記録し、失敗しても自動では送り直しません。")
