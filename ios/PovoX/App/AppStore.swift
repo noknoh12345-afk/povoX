@@ -207,6 +207,24 @@ final class AppStore: ObservableObject {
         await reload()
     }
 
+    // MARK: - アカウント(請求・紹介・プロフィール。読み取り)
+
+    func loadProfile() async -> AccountProfile? {
+        await work("profile") { try await client.call { try $0.accountProfile() } }
+    }
+
+    func loadBills() async -> Bills? {
+        await work("bills") { try await client.call { try $0.bills() } }
+    }
+
+    func loadReferral() async -> Referral? {
+        await work("referral") { try await client.call { try $0.referral() } }
+    }
+
+    func billPDF(_ id: String) async -> Data? {
+        await work("billpdf") { try await client.call { try $0.billPdf(billId: id) } }
+    }
+
     // MARK: - 設定
 
     func updateSettings(_ change: (inout Settings) -> Void) async {

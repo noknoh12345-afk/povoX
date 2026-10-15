@@ -86,6 +86,13 @@ pub const BILLS: &str = r#"{
   }
 }"#;
 
+pub const REFERRAL: &str = r#"{
+  "result": {
+    "referral_code": "MOCKREF123",
+    "message": "友だちがこのコードで登録すると、おたがいに特典がもらえます。"
+  }
+}"#;
+
 /// 3DS が要る商品を買うと challenge_url 付き、要らない商品は即完了を返す。
 pub fn order_response(sku: &str) -> String {
     if sku == "MOCK_DATA_20GB_30D" {

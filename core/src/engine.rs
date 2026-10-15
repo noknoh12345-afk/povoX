@@ -534,6 +534,53 @@ impl Engine {
             .collect())
     }
 
+    // ---- 請求・紹介・プロフィール(読み取り) --------------------------------------
+
+    /// 請求の一覧(過去・今月・都度課金)。
+    pub fn bills(&mut self) -> R<Bills> {
+        let raw = self.povo(|b| b.bills_raw())?;
+        let v = parse::bills(&raw).ok_or_else(|| local("請求の形を読めませんでした。"))?;
+        let entries = v["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|e| BillEntry {
+                kind: e["kind"].as_str().unwrap_or("unknown").to_string(),
+                title: e["title"].as_str().map(String::from),
+                subtitle: e["subtitle"].as_str().map(String::from),
+                amount: e["amount"].as_str().map(String::from),
+                time_ms: e["time_ms"].as_i64(),
+                bill_id: e["bill_id"].as_str().map(String::from),
+            })
+            .collect();
+        Ok(Bills { entries, upcoming_total: v["upcoming_total"].as_str().map(String::from) })
+    }
+
+    /// 請求書 PDF の中身(パスワード付き。パスワードは生年月日 YYYY-MM-DD)。
+    pub fn bill_pdf(&mut self, bill_id: &str) -> R<Vec<u8>> {
+        self.povo(|b| b.bill_pdf(bill_id))
+    }
+
+    /// 友だち紹介コード。
+    pub fn referral(&mut self) -> R<Referral> {
+        let raw = self.povo(|b| b.referral_raw())?;
+        let v = parse::referral(&raw).ok_or_else(|| local("紹介コードの形を読めませんでした。"))?;
+        Ok(Referral { code: v["code"].as_str().map(String::from), message: v["message"].as_str().map(String::from) })
+    }
+
+    /// アカウントの基本情報。
+    pub fn account_profile(&mut self) -> R<AccountProfile> {
+        let v = self.povo(|b| b.profile())?;
+        Ok(AccountProfile {
+            first_name: v["first_name"].as_str().map(String::from),
+            email: v["email"].as_str().map(String::from),
+            phone: v["phone"].as_str().map(String::from),
+            status: v["status"].as_str().map(String::from),
+            plan: v["plan"].as_str().map(String::from),
+            activation_date: v["activation_date"].as_str().map(String::from),
+        })
+    }
+
     // ---- 次の自動チェック ------------------------------------------------------------
 
     /// 次の自動チェックまでの目安(分)。残量の減り方・使い放題の終わり・残りの少なさで縮める。

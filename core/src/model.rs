@@ -220,6 +220,43 @@ pub struct Purchase {
     pub items: Vec<PurchaseItem>,
 }
 
+/// 請求の1件(過去・今月・都度課金)。
+#[derive(uniffi::Record, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct BillEntry {
+    /// "past" / "upcoming" / "instant" と、過去分は "paid" / "unpaid"。
+    pub kind: String,
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub amount: Option<String>,
+    pub time_ms: Option<i64>,
+    /// PDF をダウンロードできる請求だけ ID を持つ。
+    pub bill_id: Option<String>,
+}
+
+#[derive(uniffi::Record, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Bills {
+    pub entries: Vec<BillEntry>,
+    pub upcoming_total: Option<String>,
+}
+
+/// 友だち紹介のコードと案内。
+#[derive(uniffi::Record, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Referral {
+    pub code: Option<String>,
+    pub message: Option<String>,
+}
+
+/// アカウントの基本情報(users?include_telco=true から)。
+#[derive(uniffi::Record, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AccountProfile {
+    pub first_name: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub status: Option<String>,
+    pub plan: Option<String>,
+    pub activation_date: Option<String>,
+}
+
 #[derive(uniffi::Enum, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OrderSource {

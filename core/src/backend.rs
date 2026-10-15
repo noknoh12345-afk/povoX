@@ -247,6 +247,14 @@ impl Backend {
         }
     }
 
+    /// 友だち紹介コード(`account/referral/code/get`)。
+    pub fn referral_raw(&self) -> R<String> {
+        match self {
+            Backend::Real(c) => Ok(c.get_referral_code_json()?),
+            Backend::Mock(_) => Ok(mock::REFERRAL.into()),
+        }
+    }
+
     pub fn bill_pdf(&self, bill_id: &str) -> R<Vec<u8>> {
         match self {
             Backend::Real(c) => Ok(c.download_bill_pdf(bill_id.to_string())?),

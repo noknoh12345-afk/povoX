@@ -115,6 +115,18 @@ impl PovoEngine {
     pub fn purchase_history(&self) -> Result<Vec<Purchase>, PovoXError> {
         self.write(|e| e.purchase_history()).map_err(Into::into)
     }
+    pub fn bills(&self) -> Result<Bills, PovoXError> {
+        self.write(|e| e.bills()).map_err(Into::into)
+    }
+    pub fn bill_pdf(&self, bill_id: String) -> Result<Vec<u8>, PovoXError> {
+        self.write(|e| e.bill_pdf(&bill_id)).map_err(Into::into)
+    }
+    pub fn referral(&self) -> Result<Referral, PovoXError> {
+        self.write(|e| e.referral()).map_err(Into::into)
+    }
+    pub fn account_profile(&self) -> Result<AccountProfile, PovoXError> {
+        self.write(|e| e.account_profile()).map_err(Into::into)
+    }
     pub fn order(&self, sku: String, confirm: String) -> Result<OrderResult, PovoXError> {
         self.write(|e| e.order_manual(&sku, &confirm)).map_err(Into::into)
     }

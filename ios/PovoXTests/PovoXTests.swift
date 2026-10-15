@@ -325,6 +325,21 @@ func XCTUnwrapAsync<T>(_ v: T?, file: StaticString = #filePath, line: UInt = #li
     try XCTUnwrap(v, file: file, line: line)
 }
 
+final class AccountTests: XCTestCase {
+    func testBillsReferralProfileThroughBinding() async throws {
+        let c = mockClient()
+        try await login(c)
+        let bills = try await c.call { try $0.bills() }
+        XCTAssertTrue(bills.entries.contains { $0.billId == "mock-bill-1" })
+        let pdf = try await c.call { try $0.billPdf(billId: "mock-bill-1") }
+        XCTAssertTrue(pdf.starts(with: Data("%PDF".utf8)))
+        let ref = try await c.call { try $0.referral() }
+        XCTAssertEqual(ref.code, "MOCKREF123")
+        let prof = try await c.call { try $0.accountProfile() }
+        XCTAssertEqual(prof.plan, "povo2.0")
+    }
+}
+
 final class StorageTests: XCTestCase {
     func testKeychainRoundTrip() {
         let store = KeychainSessionStore(service: "povoX-test-\(UUID().uuidString)")

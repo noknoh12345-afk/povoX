@@ -274,6 +274,18 @@ pub fn order(raw: &str) -> Option<Value> {
     }))
 }
 
+/// `account/referral/code/get`。コードと案内文を緩く読む。
+pub fn referral(raw: &str) -> Option<Value> {
+    let root = parse(raw)?;
+    let doc = unwrap(&root, &["referral_code", "referralCode", "code"]);
+    let code = s(Some(doc), &["referral_code", "referralCode", "code"]);
+    let message = s(Some(doc), &["message", "description", "subtitle", "title"]);
+    if code.is_none() && message.is_none() {
+        return None;
+    }
+    Some(json!({ "code": code, "message": message }))
+}
+
 fn money(v: Option<&Value>, keys: &[&str]) -> Option<String> {
     let obj = v?.as_object()?;
     keys.iter().find_map(|k| match obj.get(*k)? {

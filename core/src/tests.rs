@@ -447,3 +447,23 @@ fn ffi_object_and_dev_call() {
     let ctx: Value = serde_json::from_str(&eng.rule_context_json(RunMode::Live, None).unwrap()).unwrap();
     assert!(ctx["data"]["leftGB"].is_number());
 }
+
+#[test]
+fn bills_referral_profile() {
+    let (mut e, _d) = engine("");
+    login(&mut e);
+    let bills = e.bills().unwrap();
+    assert!(bills.entries.iter().any(|b| b.kind == "paid" && b.bill_id.as_deref() == Some("mock-bill-1")));
+    assert!(bills.entries.iter().any(|b| b.amount.as_deref() == Some("2,700円")));
+    // PDF が取れる(パスワード付きの本物のPDFバイト)
+    let pdf = e.bill_pdf("mock-bill-1").unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+
+    let r = e.referral().unwrap();
+    assert_eq!(r.code.as_deref(), Some("MOCKREF123"));
+    assert!(r.message.is_some());
+
+    let p = e.account_profile().unwrap();
+    assert_eq!(p.plan.as_deref(), Some("povo2.0"));
+    assert_eq!(p.status.as_deref(), Some("Active"));
+}

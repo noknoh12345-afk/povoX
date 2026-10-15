@@ -39,10 +39,25 @@ struct SettingsView: View {
                     }
                 }
 
+                if store.loggedIn {
+                    Section("アカウント") {
+                        NavigationLink { ProfileView() } label: { Label("プロフィール", systemImage: "person.crop.circle") }
+                            .accessibilityIdentifier("settings.profile")
+                        NavigationLink { BillsView() } label: { Label("請求", systemImage: "yensign.circle") }
+                            .accessibilityIdentifier("settings.bills")
+                        NavigationLink { ReferralView() } label: { Label("友だち紹介", systemImage: "gift") }
+                            .accessibilityIdentifier("settings.referral")
+                    }
+                }
+
                 Section {
                     NavigationLink { TriggersView() } label: {
                         Label("自動チェックのきっかけ", systemImage: "bolt.badge.clock")
                     }
+                    NavigationLink { CommsSettingsView() } label: {
+                        Label("通信の設定", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .accessibilityIdentifier("settings.comms")
                     HStack {
                         Label("通知", systemImage: "bell")
                         Spacer()
