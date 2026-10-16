@@ -190,6 +190,7 @@ struct AlarmEditorView: View {
                         .datePickerStyle(.wheel)
                         .labelsHidden()
                         .frame(maxWidth: .infinity)
+                        .environment(\.timeZone, DayPlanner.tokyo.timeZone)
                         .accessibilityIdentifier("alarm.time")
                 }
                 Section("繰り返し") {
@@ -203,6 +204,7 @@ struct AlarmEditorView: View {
                         WeekdayPicker(days: $draft.trigger.weekdays)
                     case .once:
                         DatePicker("日付", selection: onceDateBinding, in: Date()..., displayedComponents: .date)
+                            .environment(\.timeZone, DayPlanner.tokyo.timeZone)
                     default:
                         EmptyView()
                     }

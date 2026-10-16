@@ -301,6 +301,7 @@ struct TriggerParams: View {
             ValuePicker(title: "今日の使用量", value: orDefault($trigger.mb, 1000), options: Self.mbOptions) { "\($0)MB 以上" }
         case .timeOfDay:
             DatePicker("時刻", selection: timeBinding, displayedComponents: .hourAndMinute)
+                .environment(\.timeZone, DayPlanner.tokyo.timeZone)
             WeekdayPicker(days: $trigger.weekdays)
         case .calendarEvent:
             ValuePicker(title: "予定の", value: orDefault($trigger.leadMin, 30), options: Self.leadOptions) { $0 == 0 ? "始まるとき" : "\($0)分前" }
@@ -312,6 +313,7 @@ struct TriggerParams: View {
                 .font(.caption).foregroundStyle(.secondary)
         case .once:
             DatePicker("日時", selection: onceBinding, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                .environment(\.timeZone, DayPlanner.tokyo.timeZone)
         default:
             EmptyView()
         }
