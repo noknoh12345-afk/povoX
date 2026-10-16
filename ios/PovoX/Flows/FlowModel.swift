@@ -69,6 +69,8 @@ struct FlowTrigger: Codable, Equatable {
     var name: String?
     /// 予約の日時(ミリ秒)。
     var atMs: Int64?
+    /// スヌーズ: 時刻の通知を、押されるか消されるまで何分後にもう一度出すか(nil・0 はしない)。
+    var snoozeMin: Int?
 
     init(_ kind: FlowTriggerKind) { self.kind = kind }
 
@@ -114,6 +116,21 @@ enum FlowConditionKind: String, Codable, CaseIterable {
     /// 今日の予定に対して残量が足りない(今日のプランが「足りない」「ぎりぎり」)。
     case dayShort
     case usedTodayAbove
+    /// その日が平日(土日・祝日でない)。
+    case workday
+    /// その日が休み(土日・祝日)。
+    case dayOff
+    /// その日が祝日でない。
+    case notHoliday
+    /// その日に外出の予定がある。
+    case dayHasOuting
+    /// その日に外出の予定がない。
+    case dayNoOuting
+
+    /// 時刻だけで決まる条件(先の日の通知も前もって予約できる)。
+    var isStatic: Bool {
+        [.timeBetween, .weekdays, .workday, .dayOff, .notHoliday].contains(self)
+    }
 }
 
 struct FlowCondition: Codable, Equatable, Identifiable {
@@ -267,6 +284,18 @@ struct Flow: Codable, Equatable, Identifiable {
 
     var touchesPovo: Bool { actions.contains { $0.touchesPovo } }
     var spends: Bool { actions.contains { $0.spends } }
+    /// 中身が時刻だけで決まる(先の日の通知も前もって正しく作れる)。
+    var isStatic: Bool {
+        guard conditionsAreStatic else { return false }
+        if !notifyOnly { return true }
+        let dynamic = ["{残量}", "{あと}", "{今日}", "{予定}", "{開始}", "{場所}", "{使い放題}"]
+        return actions.allSatisfy { a in
+            a.kind == .notify && !dynamic.contains { ((a.title ?? "") + (a.body ?? "")).contains($0) }
+        }
+    }
+
+    private var conditionsAreStatic: Bool { conditions.allSatisfy { $0.kind.isStatic } }
+
     /// 通知だけのオートメーション(時刻のものは通知そのものが実行になる)。
     var notifyOnly: Bool { !actions.isEmpty && actions.allSatisfy { $0.kind == .notify || $0.kind == .dayBrief || $0.kind == .log } }
 }
@@ -334,6 +363,10 @@ struct FlowFacts {
     var intensity = 1.0
     /// 手元のトッピング一覧(必要になったときだけ読む)。
     var products: [FlowProduct]?
+    /// 学習した使い方(なければ最初の目安)。
+    var learned: LearnedModel?
+
+    var overrides: [String: Bool] { learned?.overrides ?? [:] }
 
     init() {}
 

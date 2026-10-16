@@ -40,6 +40,12 @@ final class AppStore: ObservableObject {
     @Published var today: DayPlanner.Plan?
     @Published var tomorrow: DayPlanner.Plan?
     @Published var calendarAccess: CalendarService.Access = .notDetermined
+    /// プランを作った材料(スケジュールの「次に鳴る」にも使う)。
+    @Published var planFacts: FlowFacts?
+    /// 学習した使い方。
+    @Published var learned: LearnedModel?
+    /// 今日の予定のうち、外出に数えていないもの(「外出だった」と直せるように)。
+    @Published var todayOthers: [CalEvent] = []
     @Published var ruleEnabled: Bool
     @Published var usageIntensity: Int
 
@@ -119,14 +125,37 @@ final class AppStore: ObservableObject {
     }
 
     func reloadPlans() async {
-        if let p = await services.dayPlans() {
-            today = p.today
-            tomorrow = p.tomorrow
+        let f = await services.planFacts()
+        planFacts = f
+        learned = services.learning.model()
+        if let f {
+            today = DayPlanner.plan(day: "today", facts: f)
+            tomorrow = DayPlanner.plan(day: "tomorrow", facts: f)
+            let d0 = DayPlanner.tokyo.startOfDay(for: f.now)
+            let d1 = d0.addingTimeInterval(86_400)
+            todayOthers = f.events.filter { $0.end > f.now && $0.start < d1 && $0.end > d0 && !DayPlanner.isOuting($0, overrides: f.overrides) }
         } else {
             today = nil
             tomorrow = nil
+            todayOthers = []
         }
         calendarAccess = services.calendar.access
+    }
+
+    /// 予定の直し(外出だった / 家だった / nil で元に戻す)。同じ名前の予定にも効く。
+    func setOverride(title: String, outing: Bool?) async {
+        services.learning.setOverride(title, outing: outing)
+        if outing != nil { toast = outing == true ? "「\(title)」を外出として覚えました" : "「\(title)」は外出に数えないと覚えました" }
+        await reloadPlans()
+        await services.rescheduleFlows()
+        Task { await services.learn(force: true); await reloadPlans() }
+    }
+
+    /// 今すぐ学習し直す。
+    func relearn() async {
+        learned = await services.learn(force: true)
+        await reloadPlans()
+        toast = "学習し直しました"
     }
 
     func flow(_ id: String) -> Flow? { flows.first { $0.id == id } }

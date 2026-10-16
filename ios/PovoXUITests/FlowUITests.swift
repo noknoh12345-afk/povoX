@@ -251,8 +251,18 @@ final class FlowUITests: XCTestCase {
         let saved = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "新しいオートメーション")).firstMatch
         XCTAssertTrue(saved.waitForExistence(timeout: 10), "保存したオートメーションが一覧に出ない")
 
-        // ショートカット: 1時間使い放題をタップ → 確認 → その場で購入(使い放題中になる)
-        app.buttons["ショートカット"].tap()
+        // スケジュール(目覚まし時計): 平日 6:45・スヌーズ10分のアラームを追加
+        app.buttons["スケジュール"].tap()
+        wait(app.buttons["schedule.add"]).tap()
+        wait(app.buttons["alarm.save"])
+        app.buttons["平日"].tap()
+        shot(app, "60-alarm-editor")
+        app.buttons["alarm.save"].tap()
+        wait(app.descendants(matching: .any)["schedule.next"].firstMatch, 10)
+        shot(app, "61-schedule")
+
+        // ボタン: 1時間使い放題をタップ → 確認 → その場で購入(使い放題中になる)
+        app.buttons["ボタン"].tap()
         wait(app.buttons["flowTile.g.tap.1h"]).tap()
         // 確認ダイアログの「実行する」(同じ名前の要素が複数見えることがあるので最初の1つ)
         let sheetRun = app.sheets.buttons["実行する"].firstMatch
@@ -260,6 +270,16 @@ final class FlowUITests: XCTestCase {
         tab(app, "ホーム")
         XCTAssertTrue(app.staticTexts["使い放題中"].waitForExistence(timeout: 25), "ショートカットで購入されていない")
         shot(app, "58-home-after-shortcut")
+
+        // 今日のプラン → 学習
+        let learning = app.buttons["today.learning"]
+        for _ in 0..<3 where !(learning.exists && learning.isHittable) { app.swipeUp() }
+        if learning.waitForExistence(timeout: 5) {
+            learning.tap()
+            wait(app.buttons["learn.now"]).tap()
+            shot(app, "62-learning")
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
 
         // 設定 → 計測と書き出し(第1段の数字・検証用の書き出し)
         tab(app, "設定")

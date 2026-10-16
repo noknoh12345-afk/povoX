@@ -148,15 +148,16 @@ enum DayPlanner {
         return !l.lowercased().hasPrefix("http")
     }
 
-    /// 外出の予定か。オンラインは外出ではない。場所があるか、外出らしい言葉があれば外出。
-    static func isOuting(_ e: CalEvent) -> Bool {
+    /// 外出の予定か。利用者が直した予定はその通り。オンラインは外出ではない。場所があるか、外出らしい言葉があれば外出。
+    static func isOuting(_ e: CalEvent, overrides: [String: Bool] = [:]) -> Bool {
+        if let o = overrides[LearnedModel.key(e.title)] { return o }
         if isOnline(e) { return false }
         if e.allDay { return kind(of: e) == .travel || kind(of: e) == .live || kind(of: e) == .outdoor }
         return hasPlace(e) || kind(of: e) != nil
     }
 
-    static func outing(_ e: CalEvent, intensity: Double, on day: Date) -> Outing? {
-        guard isOuting(e) else { return nil }
+    static func outing(_ e: CalEvent, intensity: Double, on day: Date, learned: LearnedModel? = nil) -> Outing? {
+        guard isOuting(e, overrides: learned?.overrides ?? [:]) else { return nil }
         let k = kind(of: e) ?? .other
         var start = e.start
         var end = e.end
@@ -170,7 +171,13 @@ enum DayPlanner {
         let hours = end.timeIntervalSince(start) / 3600
         // 移動: 場所のある予定は前後30分ずつ(1時間あたり 200MB)
         let commuteH = (hasPlace(e) || k == .travel) && !e.allDay ? 1.0 : 0
-        let mb = (hours * k.mbPerHour + commuteH * 200) * intensity
+        // 覚えた量(前後の移動を含めた1時間あたり・90%)があればそれを、なければ最初の目安 × 使い方の濃さ
+        let mb: Double
+        if let r = learned?.rate(k) {
+            mb = (hours + commuteH) * r
+        } else {
+            mb = (hours * k.mbPerHour + commuteH * 200) * intensity
+        }
         let pad: TimeInterval = commuteH > 0 ? 30 * 60 : 0
         return Outing(event: e, kind: k, start: start.addingTimeInterval(-pad), end: end.addingTimeInterval(pad), estMB: mb)
     }
@@ -188,7 +195,7 @@ enum DayPlanner {
         // その日にかかる予定(今日は、まだ終わっていないものだけ)
         var outings = facts.events
             .filter { $0.end > dayStart && $0.start < dayEnd }
-            .compactMap { outing($0, intensity: facts.intensity, on: dayStart) }
+            .compactMap { outing($0, intensity: facts.intensity, on: dayStart, learned: facts.learned) }
             .filter { day == "tomorrow" || $0.end > now }
             .sorted { $0.start < $1.start }
         if day == "today" {

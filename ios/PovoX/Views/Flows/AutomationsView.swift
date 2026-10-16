@@ -12,13 +12,15 @@ struct AutomationsView: View {
     @EnvironmentObject var store: AppStore
     @State private var pane: Pane = .shortcuts
     @State private var editing: FlowEditTarget?
+    @State private var newAlarm: FlowEditTarget?
 
     enum Pane: String, CaseIterable, Identifiable {
-        case shortcuts, automations, gallery
+        case shortcuts, schedule, automations, gallery
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .shortcuts: return "ショートカット"
+            case .shortcuts: return "ボタン"
+            case .schedule: return "スケジュール"
             case .automations: return "オートメーション"
             case .gallery: return "ギャラリー"
             }
@@ -37,8 +39,15 @@ struct AutomationsView: View {
                     .accessibilityIdentifier("flows.pane")
                     switch pane {
                     case .shortcuts: ShortcutsPane(editing: $editing)
+                    case .schedule: SchedulePane(editing: $editing)
                     case .automations: AutomationsPane(editing: $editing)
-                    case .gallery: GalleryPane(added: { pane = $0.trigger.kind == .manual ? .shortcuts : .automations })
+                    case .gallery: GalleryPane(added: { f in
+                        switch f.trigger.kind {
+                        case .manual: pane = .shortcuts
+                        case .timeOfDay, .once: pane = .schedule
+                        default: pane = .automations
+                        }
+                    })
                     }
                     AdvancedRulesCard()
                 }
@@ -50,6 +59,12 @@ struct AutomationsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button {
+                            pane = .schedule
+                            newAlarm = FlowEditTarget(flow: AlarmEditorView.blank(), isNew: true)
+                        } label: {
+                            Label("アラーム(時刻・繰り返し)", systemImage: "alarm")
+                        }
                         Button { editing = FlowEditTarget(flow: FlowEditorView.blank(manual: true), isNew: true) } label: {
                             Label("新しいショートカット(ボタン)", systemImage: "hand.tap")
                         }
@@ -64,6 +79,9 @@ struct AutomationsView: View {
             }
             .sheet(item: $editing) { t in
                 FlowEditorView(flow: t.flow, isNew: t.isNew).environmentObject(store)
+            }
+            .sheet(item: $newAlarm) { t in
+                AlarmEditorView(flow: t.flow, isNew: t.isNew).environmentObject(store)
             }
         }
     }
@@ -183,7 +201,8 @@ struct AutomationsPane: View {
     @EnvironmentObject var store: AppStore
     @Binding var editing: FlowEditTarget?
 
-    private var automations: [Flow] { store.flows.filter { $0.trigger.kind != .manual } }
+    /// 時刻・1回だけのものは「スケジュール」に出す。
+    private var automations: [Flow] { store.flows.filter { ![.manual, .timeOfDay, .once].contains($0.trigger.kind) } }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -196,7 +215,7 @@ struct AutomationsPane: View {
             ForEach(automations) { f in
                 AutomationRow(flow: f, editing: $editing)
             }
-            Text("povoX が残量を確かめるたび(バックグラウンド更新・アプリ表示中・ショートカット・位置情報)に見ます。時刻と予定のものは、その時刻に通知でお知らせします。")
+            Text("povoX が残量を確かめるたび(バックグラウンド更新・アプリ表示中・ショートカット・位置情報)に見ます。予定の前のものは、その時刻に通知でお知らせします。決まった時刻のものは「スケジュール」にあります。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

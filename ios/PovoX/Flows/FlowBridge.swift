@@ -15,7 +15,7 @@ extension AppServices {
         guard let ctx = try? await c.call({ try $0.ruleContextJson(mode: .simulate, sim: nil) }) else { return nil }
         let dev = await device.current()
         let merged = RuleContextBuilder.merge(engineContextJSON: ctx, trigger: "plan", device: dev, now: now)
-        var f = AutomationService.makeFacts(contextJSON: merged, calendar: (calendar.events(now: now), calendar.authorized), settings: settings)
+        var f = AutomationService.makeFacts(contextJSON: merged, calendar: (calendar.events(days: 9, now: now), calendar.authorized), settings: settings)
         let cat = await c.value { $0.cachedCatalog() }
         f.products = cat?.products.map { FlowProduct($0) }
         return f

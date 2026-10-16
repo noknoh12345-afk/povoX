@@ -245,9 +245,10 @@ enum FlowEngine {
     /// 予定のきっかけに合う予定(外出だけ・言葉)。
     static func matchingEvents(_ t: FlowTrigger, facts: FlowFacts) -> [CalEvent] {
         let kw = (t.keyword ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        let o = facts.overrides
         return facts.events
-            .filter { !$0.allDay || DayPlanner.isOuting($0) }
-            .filter { t.outingOnly != true || DayPlanner.isOuting($0) }
+            .filter { !$0.allDay || DayPlanner.isOuting($0, overrides: o) }
+            .filter { t.outingOnly != true || DayPlanner.isOuting($0, overrides: o) }
             .filter { kw.isEmpty || ($0.title + " " + ($0.location ?? "")).lowercased().contains(kw) }
             .sorted { $0.startMs < $1.startMs }
     }
@@ -309,12 +310,12 @@ enum FlowEngine {
             return (ok, tag.isEmpty ? "未使用のコードがない" : "タグ「\(tag)」のコードがない")
         case .inOuting:
             guard facts.calendarAuthorized else { return (false, "カレンダーが許可されていない") }
-            let ok = facts.events.contains { e in DayPlanner.outing(e, intensity: 1, on: at).map { $0.start <= at && at < $0.end } ?? false }
+            let ok = facts.events.contains { e in DayPlanner.outing(e, intensity: 1, on: at, learned: facts.learned).map { $0.start <= at && at < $0.end } ?? false }
             return (ok, "外出の予定の最中ではない")
         case .outingWithin:
             guard facts.calendarAuthorized else { return (false, "カレンダーが許可されていない") }
             let limit = at.addingTimeInterval((c.hours ?? 3) * 3600)
-            let ok = facts.events.contains { e in DayPlanner.isOuting(e) && e.start > at && e.start <= limit }
+            let ok = facts.events.contains { e in DayPlanner.isOuting(e, overrides: facts.overrides) && e.start > at && e.start <= limit }
             return (ok, "\(hoursText(c.hours ?? 3))以内に外出の予定がない")
         case .dayShort:
             guard facts.calendarAuthorized else { return (false, "カレンダーが許可されていない") }
@@ -325,6 +326,18 @@ enum FlowEngine {
         case .usedTodayAbove:
             guard let u = facts.usedTodayMB else { return (false, "今日の使用量が分からない") }
             return (u >= Double(c.mb ?? 1000), "今日 \(Int(u))MB")
+        case .workday:
+            return (!JapaneseHolidays.isDayOff(at), JapaneseHolidays.name(at) ?? "土日")
+        case .dayOff:
+            return (JapaneseHolidays.isDayOff(at), "平日")
+        case .notHoliday:
+            return (!JapaneseHolidays.isHoliday(at), JapaneseHolidays.name(at) ?? "祝日")
+        case .dayHasOuting, .dayNoOuting:
+            guard facts.calendarAuthorized else { return (false, "カレンダーが許可されていない") }
+            let d0 = DayPlanner.tokyo.startOfDay(for: at)
+            let d1 = d0.addingTimeInterval(86_400)
+            let has = facts.events.contains { e in e.end > d0 && e.start < d1 && DayPlanner.isOuting(e, overrides: facts.overrides) }
+            return c.kind == .dayHasOuting ? (has, "その日に外出の予定がない") : (!has, "その日に外出の予定がある")
         }
     }
 
@@ -449,17 +462,22 @@ enum FlowEngine {
 
     // MARK: - 予約の通知
 
-    /// 時刻・予定・予約のきっかけについて、この先 horizon 時間に出す通知。
-    /// 通知だけのオートメーションは、その通知が実行そのもの。povo やお金にかかわるものは「実行する」ボタン付き。
-    static func schedule(flows: [Flow], facts: FlowFacts, memory: FlowMemory, horizonHours: Double = 36) -> [FlowScheduleItem] {
+    /// 時刻・予定・予約のきっかけについて、この先に出す通知(目覚まし時計のように前もって予約する)。
+    /// - 中身が時刻だけで決まるもの(曜日・祝日・時間帯の条件だけ)は 8日先まで。
+    /// - 残量や予定で中身が変わるものは 36時間先までは中身を作って予約し、その先は「タップで最新の内容」の通知で予約しておく
+    ///   (アプリが起こされたら作り直す。起こされなくても時刻には必ず鳴る)。
+    /// - スヌーズ: 押されるか消されるまで、決めた分だけあとにもう一度。
+    /// 通知だけのオートメーションは通知そのものが実行。povo やお金・設定にかかわるものは「実行する」ボタン付き。
+    static func schedule(flows: [Flow], facts: FlowFacts, memory: FlowMemory, horizonHours: Double = 36, staticDays: Int = 8) -> [FlowScheduleItem] {
         let now = facts.now
-        let limit = now.addingTimeInterval(horizonHours * 3600)
+        let near = now.addingTimeInterval(horizonHours * 3600)
+        let far = now.addingTimeInterval(Double(staticDays) * 86_400)
         var out: [FlowScheduleItem] = []
         for flow in flows where flow.enabled && flow.trigger.isScheduled {
             var times: [(Date, String, CalEvent?)] = []
             switch flow.trigger.kind {
             case .timeOfDay:
-                for dayOffset in 0...2 {
+                for dayOffset in 0...staticDays {
                     guard let d = DayPlanner.tokyo.date(byAdding: .day, value: dayOffset, to: now),
                           let at = time(flow.trigger, on: d) else { continue }
                     let wd = DayPlanner.tokyo.component(.weekday, from: at) - 1
@@ -476,24 +494,72 @@ enum FlowEngine {
             default:
                 break
             }
-            for (at, occ, event) in times where at > now && at <= limit && !memory.wasFired(flow.id, occ) {
+            let stat = flow.isStatic && flow.trigger.kind != .calendarEvent
+            for (at, occ, event) in times where at > now && !memory.wasFired(flow.id, occ) {
+                let id = "flow-sched-\(flow.id)-\(occ)"
                 var f = facts
                 f.now = at
-                guard conditionsHold(flow, facts: f, at: at).0 else { continue }
-                let id = "flow-sched-\(flow.id)-\(occ)"
-                if flow.notifyOnly {
-                    // 中身を今のうちに作っておく(時刻にはアプリが動いていないことが多い)
-                    guard let first = renderNotifyOnly(flow, facts: f, event: event) else { continue }
-                    out.append(FlowScheduleItem(id: id, flowID: flow.id, fireAt: at, title: first.title, body: first.body, runnable: false, occurrence: occ))
-                } else {
-                    let what = flow.actions.map { FlowText.action($0) }.joined(separator: "→")
-                    let when = event.map { "予定「\($0.title)」(\(DayPlanner.hm($0.start)))の前です。" } ?? (flow.trigger.kind == .once ? "予約した時刻です。" : "\(DayPlanner.hm(at)) になりました。")
-                    out.append(FlowScheduleItem(id: id, flowID: flow.id, fireAt: at, title: "povoX: \(flow.name)",
-                                                body: "\(when)「実行する」で \(what)", runnable: true, occurrence: occ))
+                var item: FlowScheduleItem?
+                if at <= near || stat {
+                    guard at <= (stat ? far : near), conditionsHold(flow, facts: f, at: at).0 else { continue }
+                    if flow.notifyOnly {
+                        // 中身を今のうちに作っておく(時刻にはアプリが動いていないことが多い)
+                        if let first = renderNotifyOnly(flow, facts: f, event: event) {
+                            item = FlowScheduleItem(id: id, flowID: flow.id, fireAt: at, title: first.title, body: first.body, runnable: false, occurrence: occ)
+                        }
+                    } else {
+                        let what = flow.actions.map { FlowText.action($0) }.joined(separator: "→")
+                        let when = event.map { "予定「\($0.title)」(\(DayPlanner.hm($0.start)))の前です。" } ?? (flow.trigger.kind == .once ? "予約した時刻です。" : "\(DayPlanner.hm(at)) になりました。")
+                        item = FlowScheduleItem(id: id, flowID: flow.id, fireAt: at, title: "povoX: \(flow.name)",
+                                                body: "\(when)「実行する」で \(what)", runnable: true, occurrence: occ)
+                    }
+                } else if at <= far, flow.trigger.kind == .timeOfDay {
+                    // 先の日: 中身は鳴る時点の状態で決まるので、ここでは鳴らすことだけ予約する
+                    // (曜日・祝日など時刻だけで決まる条件は先に見て、合わない日は鳴らさない)
+                    // 予定の有無は予約するときに読んだ予定(先8日)で見る
+                    let staticConds = flow.conditions.filter { $0.kind.isStatic || $0.kind == .dayHasOuting || $0.kind == .dayNoOuting }
+                    guard staticConds.allSatisfy({ check($0, facts: f, at: at).0 }) else { continue }
+                    item = FlowScheduleItem(id: id, flowID: flow.id, fireAt: at, title: "povoX: \(flow.name)",
+                                            body: "\(DayPlanner.hm(at)) になりました。タップすると最新の残量・予定で確認できます。",
+                                            runnable: !flow.notifyOnly, occurrence: occ)
+                }
+                guard let it = item else { continue }
+                out.append(it)
+                if let sn = flow.trigger.snoozeMin, sn > 0 {
+                    var s2 = it
+                    s2.id = it.id + "-snooze"
+                    s2.fireAt = it.fireAt.addingTimeInterval(Double(sn) * 60)
+                    s2.title = "(スヌーズ)" + it.title
+                    out.append(s2)
                 }
             }
         }
-        return Array(out.sorted { $0.fireAt < $1.fireAt }.prefix(40))
+        return Array(out.sorted { $0.fireAt < $1.fireAt }.prefix(56))
+    }
+
+    /// 次に鳴る時刻(目覚まし時計の「次のアラーム」)。時刻・曜日・祝日・予定の有無で決まるところまで見る。
+    static func nextRing(_ flow: Flow, facts: FlowFacts, days: Int = 14) -> Date? {
+        guard flow.enabled else { return nil }
+        switch flow.trigger.kind {
+        case .once:
+            guard let ms = flow.trigger.atMs else { return nil }
+            let at = Date(timeIntervalSince1970: Double(ms) / 1000)
+            return at > facts.now ? at : nil
+        case .timeOfDay:
+            for d in 0...days {
+                guard let day = DayPlanner.tokyo.date(byAdding: .day, value: d, to: facts.now),
+                      let at = time(flow.trigger, on: day), at > facts.now else { continue }
+                let wd = DayPlanner.tokyo.component(.weekday, from: at) - 1
+                if let ws = flow.trigger.weekdays, !ws.contains(wd) { continue }
+                let conds = flow.conditions.filter { $0.kind.isStatic || $0.kind == .dayHasOuting || $0.kind == .dayNoOuting }
+                var f = facts
+                f.now = at
+                if conds.allSatisfy({ check($0, facts: f, at: at).0 }) { return at }
+            }
+            return nil
+        default:
+            return nil
+        }
     }
 
     static func renderNotifyOnly(_ flow: Flow, facts: FlowFacts, event: CalEvent?) -> (title: String, body: String)? {

@@ -160,6 +160,11 @@ final class AutomationService {
         f.events = calendar.events
         f.calendarAuthorized = calendar.authorized
         f.intensity = settings.intensityFactor
+        f.learned = LearningStore(defaults: settings.defaults).model()
+        if f.learned == nil {
+            let o = LearningStore(defaults: settings.defaults).overrides()
+            if !o.isEmpty { var m = LearnedModel.empty; m.overrides = o; f.learned = m }
+        }
         return f
     }
 

@@ -56,6 +56,8 @@ final class AppServices {
     let flows: FlowStore
     /// 第1段の測定(起こされた時刻・通知の配信・通信量カウンタ)。
     let wakeLog: WakeLog
+    /// 学習した使い方と、利用者の直し。
+    let learning: LearningStore
     private(set) lazy var automation: AutomationService = makeAutomation()
 
     private let lock = NSLock()
@@ -83,6 +85,7 @@ final class AppServices {
         flows = FlowStore(defaults: settings.defaults)
         wakeLog = WakeLog(defaults: settings.defaults)
         WakeRecorder.log = wakeLog
+        learning = LearningStore(defaults: settings.defaults)
         flows.seedIfNeeded()
         if launch.demoCalendar { calendar.demoEvents = CalendarService.demo() }
         device.override = launch.device
@@ -160,6 +163,28 @@ final class AppServices {
         ))
     }
 
+    /// 学習し直す(端末の中だけ。30分に1回まで。force で今すぐ)。
+    @discardableResult
+    func learn(force: Bool = false) async -> LearnedModel? {
+        let key = "learn.lastRun"
+        if !force, let last = settings.defaults.object(forKey: key) as? Date, Date().timeIntervalSince(last) < 30 * 60 {
+            return learning.model()
+        }
+        settings.defaults.set(Date(), forKey: key)
+        let now = Date()
+        let hist = await client.value { $0.history(hours: 120 * 24) }
+        let net: [(t: Int64, s: NetSample)] = wakeLog.events().compactMap { e -> (t: Int64, s: NetSample)? in
+            guard let n = e.net else { return nil }
+            return (t: e.tMs, s: n)
+        }
+        let events = calendar.events(from: now.addingTimeInterval(-90 * 86_400), to: now)
+        let input = UsageLearner.Input(samples: hist.map { (t: $0.tMs, leftKb: $0.leftKb, unlimited: $0.unlimited) }, net: net, events: events,
+                                       overrides: learning.overrides(), now: now)
+        let model = await Task.detached(priority: .utility) { UsageLearner.learn(input) }.value
+        learning.save(model)
+        return learning.model()
+    }
+
     /// オートメーションの「設定を変える」アクション。
     func apply(_ effects: [FlowEffect]) async {
         let c = client
@@ -197,7 +222,8 @@ final class AppServices {
         }
         let dev = await device.current()
         let merged = RuleContextBuilder.merge(engineContextJSON: ctx, trigger: "schedule", device: dev, now: Date())
-        let facts = AutomationService.makeFacts(contextJSON: merged, calendar: (calendar.events(), calendar.authorized), settings: settings)
+        // 先8日の予定(「外出の予定がある日だけ」のアラームを前もって予約するため)
+        let facts = AutomationService.makeFacts(contextJSON: merged, calendar: (calendar.events(days: 9), calendar.authorized), settings: settings)
         let list = flows.flows()
         let memory = flows.memory()
         await FlowScheduler.apply(FlowEngine.schedule(flows: list, facts: facts, memory: memory), enabled: enabled)

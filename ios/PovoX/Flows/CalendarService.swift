@@ -37,12 +37,17 @@ final class CalendarService {
 
     /// 今日の0時から days 日分の予定。
     func events(days: Int = 2, now: Date = Date()) -> [CalEvent] {
-        if let demo = demoEvents { return demo }
-        guard authorized else { return [] }
         let start = DayPlanner.tokyo.startOfDay(for: now)
         let end = DayPlanner.tokyo.date(byAdding: .day, value: days, to: start) ?? start.addingTimeInterval(Double(days) * 86400)
+        return events(from: start, to: end)
+    }
+
+    /// start〜end の予定(学習には過去の予定も使う)。
+    func events(from start: Date, to end: Date) -> [CalEvent] {
+        if let demo = demoEvents { return demo.filter { $0.end > start && $0.start < end } }
+        guard authorized else { return [] }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        return store.events(matching: predicate).prefix(200).compactMap { e in
+        return store.events(matching: predicate).prefix(3000).compactMap { e in
             guard let s = e.startDate, let en = e.endDate else { return nil }
             // 「予定なし(空き時間)」にしている予定は外出とみなさない
             if e.availability == .free && !e.isAllDay { return nil }

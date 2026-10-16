@@ -119,6 +119,11 @@ enum FlowText {
         case .outingWithin: return "もうすぐ外出の予定"
         case .dayShort: return "今日の予定に残量が足りない"
         case .usedTodayAbove: return "今日たくさん使った"
+        case .workday: return "平日(祝日を除く)"
+        case .dayOff: return "休みの日(土日祝)"
+        case .notHoliday: return "祝日は休む"
+        case .dayHasOuting: return "外出の予定がある日"
+        case .dayNoOuting: return "外出の予定がない日"
         }
     }
 
@@ -138,14 +143,18 @@ enum FlowText {
         case .inOuting, .outingWithin: return "figure.walk"
         case .dayShort: return "calendar.badge.exclamationmark"
         case .usedTodayAbove: return "chart.bar"
+        case .workday: return "briefcase"
+        case .dayOff, .notHoliday: return "flag"
+        case .dayHasOuting: return "figure.walk.departure"
+        case .dayNoOuting: return "house"
         }
     }
 
     static let conditionGroups: [(String, [FlowConditionKind])] = [
         ("残量", [.dataBelow, .dataAbove, .hoursLeftBelow, .usedTodayAbove, .unlimitedActive, .unlimitedInactive]),
-        ("予定", [.dayShort, .outingWithin, .inOuting]),
+        ("予定", [.dayShort, .dayHasOuting, .dayNoOuting, .outingWithin, .inOuting]),
         ("つながり・電池", [.onCellular, .onWifi, .batteryBelow, .notCharging, .charging, .lowPower]),
-        ("時間", [.timeBetween, .weekdays]),
+        ("日・時間", [.workday, .dayOff, .notHoliday, .timeBetween, .weekdays]),
         ("コード", [.hasCodes]),
     ]
 
@@ -169,6 +178,11 @@ enum FlowText {
         case .outingWithin: return "\(FlowEngine.hoursText(c.hours ?? 3))以内に外出の予定"
         case .dayShort: return "今日の予定に残量が足りない"
         case .usedTodayAbove: return "今日 \(c.mb ?? 1000)MB 以上使った"
+        case .workday: return "平日(祝日を除く)"
+        case .dayOff: return "土日・祝日"
+        case .notHoliday: return "祝日でない日"
+        case .dayHasOuting: return "その日に外出の予定がある"
+        case .dayNoOuting: return "その日に外出の予定がない"
         }
     }
 
@@ -237,6 +251,28 @@ enum FlowText {
         case "auto": return "自動"
         default: return "通知で確認"
         }
+    }
+
+    /// 目覚まし時計の一覧に出す「いつ鳴るか」(繰り返し・祝日・どんな日・スヌーズ)。
+    static func alarmRepeat(_ f: Flow) -> String {
+        var parts: [String] = []
+        if f.trigger.kind == .once, let ms = f.trigger.atMs {
+            let d = Date(timeIntervalSince1970: Double(ms) / 1000)
+            let c = DayPlanner.tokyo.dateComponents([.month, .day, .weekday], from: d)
+            parts.append("\(c.month ?? 0)/\(c.day ?? 0)(\(FlowEngine.weekdayName((c.weekday ?? 1) - 1)))だけ")
+        } else if f.conditions.contains(where: { $0.kind == .workday }) {
+            parts.append("平日(祝日を除く)")
+        } else if f.conditions.contains(where: { $0.kind == .dayOff }) {
+            parts.append("土日・祝日")
+        } else {
+            parts.append(weekdays(f.trigger.weekdays))
+            if f.conditions.contains(where: { $0.kind == .notHoliday }) { parts.append("祝日は休む") }
+        }
+        if f.conditions.contains(where: { $0.kind == .dayHasOuting }) { parts.append("外出の日だけ") }
+        if f.conditions.contains(where: { $0.kind == .dayNoOuting }) { parts.append("家の日だけ") }
+        if f.conditions.contains(where: { $0.kind == .dayShort }) { parts.append("足りない日だけ") }
+        if let s = f.trigger.snoozeMin, s > 0 { parts.append("スヌーズ\(s)分") }
+        return parts.joined(separator: "・")
     }
 
     /// 一覧に出す1行の要約(きっかけ → すること)。

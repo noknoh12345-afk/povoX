@@ -8,6 +8,12 @@ struct TodayPlanCard: View {
 
     private var plan: DayPlanner.Plan? { showTomorrow ? store.tomorrow : store.today }
 
+    private var learnLabel: String {
+        guard let m = store.learned else { return "学習: まだ" }
+        let n = m.kinds.values.reduce(0) { $0 + $1.events }
+        return n > 0 ? "学習: 外出\(n)件から" : "学習: データ待ち"
+    }
+
     var body: some View {
         Group {
             if store.calendarAccess != .authorized {
@@ -67,7 +73,7 @@ struct TodayPlanCard: View {
                 .accessibilityIdentifier("today.headline")
             if !p.outings.isEmpty {
                 VStack(spacing: 8) {
-                    ForEach(p.outings) { o in OutingRow(outing: o) }
+                    ForEach(p.outings) { o in OutingRow(outing: o, learned: store.learned?.rate(o.kind) != nil) }
                 }
                 if let left = p.leftMB, p.needMB > 0, p.verdict != .covered {
                     VStack(alignment: .leading, spacing: 4) {
@@ -82,7 +88,19 @@ struct TodayPlanCard: View {
             if let s = p.suggestion {
                 SuggestionBox(suggestion: s, plan: p, confirmNow: $confirmNow)
             }
-            IntensityMenu()
+            if !showTomorrow && !store.todayOthers.isEmpty {
+                OtherEventsList(events: store.todayOthers)
+            }
+            HStack {
+                IntensityMenu()
+                Spacer(minLength: 0)
+                NavigationLink { LearningView() } label: {
+                    Label(learnLabel, systemImage: "brain")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("today.learning")
+            }
         }
     }
 }
@@ -103,7 +121,10 @@ private struct VerdictChip: View {
 }
 
 private struct OutingRow: View {
+    @EnvironmentObject var store: AppStore
     let outing: DayPlanner.Outing
+    /// この種類の量を学習済みか。
+    var learned = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -114,12 +135,48 @@ private struct OutingRow: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Text("約\(DayPlanner.mbText(outing.estMB))").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("約\(DayPlanner.mbText(outing.estMB))").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
+                Text(learned ? "学習済み" : "目安").font(.caption2).foregroundStyle(.tertiary)
+            }
+            Menu {
+                Button { Task { await store.setOverride(title: outing.event.title, outing: false) } } label: {
+                    Label("家だった(外出に数えない)", systemImage: "house")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+            }
+            .accessibilityIdentifier("today.outing.menu")
         }
     }
 
     private var timeText: String {
         outing.event.allDay ? "終日(\(outing.kind.label))" : "\(DayPlanner.hm(outing.event.start))〜\(DayPlanner.hm(outing.event.end))"
+    }
+}
+
+/// 外出に数えていない今日の予定(「外出だった」と直せる)。
+private struct OtherEventsList: View {
+    @EnvironmentObject var store: AppStore
+    let events: [CalEvent]
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open) {
+            ForEach(events) { e in
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(e.title).font(.caption).lineLimit(1)
+                        Text(e.allDay ? "終日" : "\(DayPlanner.hm(e.start))〜\(DayPlanner.hm(e.end))").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("外出だった") { Task { await store.setOverride(title: e.title, outing: true) } }
+                        .font(.caption)
+                }
+            }
+        } label: {
+            Text("外出に数えていない予定 \(events.count)件").font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 

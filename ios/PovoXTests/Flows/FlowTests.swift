@@ -8,6 +8,11 @@ final class FlowTests: XCTestCase {
         FlowLogicChecks.run { XCTFail($0) }
     }
 
+    /// 祝日・学習・目覚まし時計のような予約(パソコン上の検査と同じもの)。
+    func testLearningHolidaysAlarms() {
+        LearnChecks.run { XCTFail($0) }
+    }
+
     /// 第1段の測定の集計(パソコン上の検査と同じもの)。
     func testWakeStats() {
         WakeChecks.run { XCTFail($0) }

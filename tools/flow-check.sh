@@ -7,5 +7,6 @@ out="${TMPDIR:-/tmp}/povox-flow-check"
 swiftc -O -o "$out" \
   ios/PovoX/Flows/FlowModel.swift ios/PovoX/Flows/DayPlanner.swift ios/PovoX/Flows/FlowEngine.swift \
   ios/PovoX/Flows/FlowText.swift ios/PovoX/Flows/FlowGallery.swift ios/PovoX/Diagnostics/WakeLog.swift \
-  ios/PovoXTests/Flows/FlowLogicChecks.swift ios/PovoXTests/Flows/WakeChecks.swift tools/flow-check/main.swift
+  ios/PovoX/Flows/JapaneseHolidays.swift ios/PovoX/Flows/UsageLearner.swift \
+  ios/PovoXTests/Flows/FlowLogicChecks.swift ios/PovoXTests/Flows/WakeChecks.swift ios/PovoXTests/Flows/LearnChecks.swift tools/flow-check/main.swift
 "$out"

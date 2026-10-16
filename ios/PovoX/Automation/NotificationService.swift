@@ -32,8 +32,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         let threeDS = UNNotificationCategory(identifier: NotificationService.threeDSCategory, actions: [open],
                                              intentIdentifiers: [], options: [])
         let run = UNNotificationAction(identifier: FlowScheduler.runAction, title: "実行する", options: [.authenticationRequired])
-        let flow = UNNotificationCategory(identifier: FlowScheduler.category, actions: [run], intentIdentifiers: [], options: [])
-        center.setNotificationCategories([confirm, threeDS, flow])
+        let flow = UNNotificationCategory(identifier: FlowScheduler.category, actions: [run], intentIdentifiers: [], options: [.customDismissAction])
+        let flowInfo = UNNotificationCategory(identifier: FlowScheduler.infoCategory, actions: [], intentIdentifiers: [], options: [.customDismissAction])
+        center.setNotificationCategories([confirm, threeDS, flow, flowInfo])
     }
 
     func requestAuthorization() async -> Bool {
@@ -94,6 +95,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         default: break
         }
         let done = { DispatchQueue.main.async { completionHandler() } }
+        // 予約した通知は、押した・消した時点でスヌーズを止める
+        FlowScheduler.cancelSnooze(notificationID: response.notification.request.identifier)
+        if action == UNNotificationDismissActionIdentifier { return done() }
         switch action {
         case NotificationService.executeAction:
             guard let pid, let confirm = onConfirm else { return done() }

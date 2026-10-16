@@ -10,6 +10,8 @@ import UserNotifications
 ///   その前に自動チェックで実行できたときは、予約した通知を取り消す。
 enum FlowScheduler {
     static let category = "POVOX_FLOW"
+    /// 通知だけのもの(消したらスヌーズも止めるため、消したことをアプリに知らせる)。
+    static let infoCategory = "POVOX_FLOW_INFO"
     static let runAction = "POVOX_FLOW_RUN"
     static let prefix = "flow-sched-"
 
@@ -42,6 +44,8 @@ enum FlowScheduler {
             if it.runnable {
                 content.categoryIdentifier = category
                 content.interruptionLevel = .timeSensitive
+            } else {
+                content.categoryIdentifier = infoCategory
             }
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
             try? await center.add(UNNotificationRequest(identifier: it.id, content: content, trigger: trigger))
@@ -53,7 +57,13 @@ enum FlowScheduler {
     static func remove(flowID: String, occurrence: String) {
         let id = identifier(flowID: flowID, occurrence: occurrence)
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [id])
-        center.removeDeliveredNotifications(withIdentifiers: [id])
+        center.removePendingNotificationRequests(withIdentifiers: [id, id + "-snooze"])
+        center.removeDeliveredNotifications(withIdentifiers: [id, id + "-snooze"])
+    }
+
+    /// 通知を押した・消したら、そのスヌーズは止める(目覚まし時計と同じ)。
+    static func cancelSnooze(notificationID id: String) {
+        guard id.hasPrefix(prefix), !id.hasSuffix("-snooze") else { return }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id + "-snooze"])
     }
 }
