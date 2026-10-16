@@ -1,0 +1,76 @@
+== PovoX.app: 実行ファイル 2 個
+  (app)                        id=jp.povox.app 最低iOS=17.0
+  PlugIns/PovoXWidget.appex    id=jp.povox.app.widget 最低iOS=17.0
+  PlugIns/PovoXWidget.appex/PovoXWidget [executable, iossim, minos 17.0.0, sdk 18.5.0]
+      rpath    @executable_path/Frameworks
+      rpath    @executable_path/../../Frameworks
+      load     /System/Library/Frameworks/Foundation.framework/Foundation
+      load     /usr/lib/libobjc.A.dylib
+      load     /usr/lib/libSystem.B.dylib
+      load     /System/Library/Frameworks/SwiftUI.framework/SwiftUI
+      load     /System/Library/Frameworks/UIKit.framework/UIKit
+      load     /System/Library/Frameworks/WidgetKit.framework/WidgetKit
+      load     /usr/lib/swift/libswiftCore.dylib
+      load     /usr/lib/swift/libswiftCoreFoundation.dylib
+      weak     /usr/lib/swift/libswiftCoreImage.dylib
+      weak     /usr/lib/swift/libswiftCoreLocation.dylib
+      weak     /usr/lib/swift/libswiftDarwin.dylib
+      weak     /usr/lib/swift/libswiftDataDetection.dylib
+      weak     /usr/lib/swift/libswiftDispatch.dylib
+      weak     /usr/lib/swift/libswiftIntents.dylib
+      weak     /usr/lib/swift/libswiftMetal.dylib
+      weak     /usr/lib/swift/libswiftOSLog.dylib
+      weak     /usr/lib/swift/libswiftObjectiveC.dylib
+      weak     /usr/lib/swift/libswiftQuartzCore.dylib
+      weak     /usr/lib/swift/libswiftSpatial.dylib
+      weak     /usr/lib/swift/libswiftUniformTypeIdentifiers.dylib
+      weak     /usr/lib/swift/libswiftXPC.dylib
+      load     /usr/lib/swift/libswift_Concurrency.dylib
+      load     /usr/lib/swift/libswiftos.dylib
+      weak     /usr/lib/swift/libswiftsimd.dylib
+  PovoX [executable, iossim, minos 17.0.0, sdk 18.5.0]
+      rpath    @executable_path/Frameworks
+      load     /System/Library/Frameworks/Foundation.framework/Foundation
+      load     /usr/lib/libobjc.A.dylib
+      load     /usr/lib/libSystem.B.dylib
+      load     /System/Library/Frameworks/AppIntents.framework/AppIntents
+      load     /System/Library/Frameworks/BackgroundTasks.framework/BackgroundTasks
+      load     /System/Library/Frameworks/Charts.framework/Charts
+      load     /System/Library/Frameworks/Combine.framework/Combine
+      load     /System/Library/Frameworks/CoreFoundation.framework/CoreFoundation
+      load     /System/Library/Frameworks/CoreLocation.framework/CoreLocation
+      load     /System/Library/Frameworks/CryptoKit.framework/CryptoKit
+      load     /System/Library/Frameworks/EventKit.framework/EventKit
+      load     /System/Library/Frameworks/JavaScriptCore.framework/JavaScriptCore
+      load     /System/Library/Frameworks/Network.framework/Network
+      load     /System/Library/Frameworks/Security.framework/Security
+      load     /System/Library/Frameworks/SwiftUI.framework/SwiftUI
+      load     /System/Library/Frameworks/UIKit.framework/UIKit
+      load     /System/Library/Frameworks/UserNotifications.framework/UserNotifications
+      load     /System/Library/Frameworks/VisionKit.framework/VisionKit
+      load     /System/Library/Frameworks/WebKit.framework/WebKit
+      load     /System/Library/Frameworks/WidgetKit.framework/WidgetKit
+      weak     /usr/lib/swift/libswiftAVFoundation.dylib
+      weak     /usr/lib/swift/libswiftAccelerate.dylib
+      load     /usr/lib/swift/libswiftCore.dylib
+      weak     /usr/lib/swift/libswiftCoreAudio.dylib
+      load     /usr/lib/swift/libswiftCoreFoundation.dylib
+      weak     /usr/lib/swift/libswiftCoreImage.dylib
+      weak     /usr/lib/swift/libswiftCoreLocation.dylib
+      weak     /usr/lib/swift/libswiftCoreMIDI.dylib
+      weak     /usr/lib/swift/libswiftCoreMedia.dylib
+      weak     /usr/lib/swift/libswiftDarwin.dylib
+      weak     /usr/lib/swift/libswiftDataDetection.dylib
+      load     /usr/lib/swift/libswiftDispatch.dylib
+      weak     /usr/lib/swift/libswiftIntents.dylib
+      weak     /usr/lib/swift/libswiftMetal.dylib
+      weak     /usr/lib/swift/libswiftOSLog.dylib
+      load     /usr/lib/swift/libswiftObjectiveC.dylib
+      weak     /usr/lib/swift/libswiftQuartzCore.dylib
+      weak     /usr/lib/swift/libswiftSpatial.dylib
+      weak     /usr/lib/swift/libswiftUniformTypeIdentifiers.dylib
+      weak     /usr/lib/swift/libswiftXPC.dylib
+      load     /usr/lib/swift/libswift_Concurrency.dylib
+      load     /usr/lib/swift/libswiftos.dylib
+      weak     /usr/lib/swift/libswiftsimd.dylib
+OK: 読み込むライブラリはすべて OS かアプリの中のものです

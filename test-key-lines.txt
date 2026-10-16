@@ -1,0 +1,79 @@
+2026-10-16 14:51:34.852 appintentsnltrainingprocessor[14573:45472] error: Unable to parse extract.actionsdata
+Test Case '-[PovoXTests.AccountTests testBillsReferralProfileThroughBinding]' started.
+Test Case '-[PovoXTests.AccountTests testBillsReferralProfileThroughBinding]' passed (0.017 seconds).
+Test Case '-[PovoXTests.AutomationTests testLiveRunQueuesConfirmationAndNotifies]' started.
+Test Case '-[PovoXTests.AutomationTests testLiveRunQueuesConfirmationAndNotifies]' passed (0.312 seconds).
+Test Case '-[PovoXTests.AutomationTests testNotLoggedInOrHaltedDoesNothing]' started.
+Test Case '-[PovoXTests.AutomationTests testNotLoggedInOrHaltedDoesNothing]' passed (0.003 seconds).
+Test Case '-[PovoXTests.AutomationTests testSimulationUsesSimulatedState]' started.
+Test Case '-[PovoXTests.AutomationTests testSimulationUsesSimulatedState]' passed (0.013 seconds).
+Test Case '-[PovoXTests.EngineTests testConfirmFlowThroughEngine]' started.
+Test Case '-[PovoXTests.EngineTests testConfirmFlowThroughEngine]' passed (0.007 seconds).
+Test Case '-[PovoXTests.EngineTests testLoginSnapshotCatalog]' started.
+Test Case '-[PovoXTests.EngineTests testLoginSnapshotCatalog]' passed (0.006 seconds).
+Test Case '-[PovoXTests.EngineTests testTypedErrorAndHalt]' started.
+Test Case '-[PovoXTests.EngineTests testTypedErrorAndHalt]' passed (0.012 seconds).
+Test Case '-[PovoXTests.FlowTests testAskingAutomationQueuesConfirmation]' started.
+Test Case '-[PovoXTests.FlowTests testAskingAutomationQueuesConfirmation]' passed (0.029 seconds).
+Test Case '-[PovoXTests.FlowTests testCalendarAndReservation]' started.
+Test Case '-[PovoXTests.FlowTests testCalendarAndReservation]' passed (0.025 seconds).
+Test Case '-[PovoXTests.FlowTests testDayPlanFromEngine]' started.
+Test Case '-[PovoXTests.FlowTests testDayPlanFromEngine]' passed (0.022 seconds).
+Test Case '-[PovoXTests.FlowTests testFlowLogic]' started.
+Test Case '-[PovoXTests.FlowTests testFlowLogic]' passed (0.014 seconds).
+Test Case '-[PovoXTests.FlowTests testLearningHolidaysAlarms]' started.
+Test Case '-[PovoXTests.FlowTests testLearningHolidaysAlarms]' passed (3.227 seconds).
+Test Case '-[PovoXTests.FlowTests testModeShortcutAppliesEffects]' started.
+Test Case '-[PovoXTests.FlowTests testModeShortcutAppliesEffects]' passed (0.016 seconds).
+Test Case '-[PovoXTests.FlowTests testNetCountersReadable]' started.
+Test Case '-[PovoXTests.FlowTests testNetCountersReadable]' passed (0.017 seconds).
+Test Case '-[PovoXTests.FlowTests testNothingMatches]' started.
+Test Case '-[PovoXTests.FlowTests testNothingMatches]' passed (0.020 seconds).
+Test Case '-[PovoXTests.FlowTests testSimulationIncludesFlows]' started.
+Test Case '-[PovoXTests.FlowTests testSimulationIncludesFlows]' passed (0.016 seconds).
+Test Case '-[PovoXTests.FlowTests testTappedShortcutBuysThroughEngine]' started.
+Test Case '-[PovoXTests.FlowTests testTappedShortcutBuysThroughEngine]' passed (0.011 seconds).
+Test Case '-[PovoXTests.FlowTests testWakeStats]' started.
+Test Case '-[PovoXTests.FlowTests testWakeStats]' passed (78.553 seconds).
+Test Case '-[PovoXTests.IntentTests testShortcutIntentsRunInApp]' started.
+Test Case '-[PovoXTests.IntentTests testShortcutIntentsRunInApp]' passed (0.457 seconds).
+Test Case '-[PovoXTests.OptimizeTests testOptimizeRecommendsCheapestThroughBinding]' started.
+Test Case '-[PovoXTests.OptimizeTests testOptimizeRecommendsCheapestThroughBinding]' passed (0.010 seconds).
+Test Case '-[PovoXTests.RecipeTests testCatalogLoadsAndIsLarge]' started.
+Test Case '-[PovoXTests.RecipeTests testCatalogLoadsAndIsLarge]' passed (0.014 seconds).
+Test Case '-[PovoXTests.RecipeTests testEveryRecipeCompilesAndChecks]' started.
+Test Case '-[PovoXTests.RecipeTests testEveryRecipeCompilesAndChecks]' passed (0.587 seconds).
+Test Case '-[PovoXTests.RecipeTests testEveryRecipeRunsWithoutError]' started.
+Test Case '-[PovoXTests.RecipeTests testEveryRecipeRunsWithoutError]' passed (8.084 seconds).
+Test Case '-[PovoXTests.RecipeTests testRepresentativeRecipeDecisions]' started.
+Test Case '-[PovoXTests.RecipeTests testRepresentativeRecipeDecisions]' passed (0.061 seconds).
+Test Case '-[PovoXTests.RuleEngineTests testCatalogComesFromEngine]' started.
+Test Case '-[PovoXTests.RuleEngineTests testCatalogComesFromEngine]' passed (0.024 seconds).
+Test Case '-[PovoXTests.RuleEngineTests testErrorsAreReportedWithLines]' started.
+Test Case '-[PovoXTests.RuleEngineTests testErrorsAreReportedWithLines]' passed (0.098 seconds).
+Test Case '-[PovoXTests.RuleEngineTests testInfiniteLoopIsStopped]' started.
+Test Case '-[PovoXTests.RuleEngineTests testInfiniteLoopIsStopped]' passed (3.208 seconds).
+Test Case '-[PovoXTests.RuleEngineTests testLogsStateAndShapes]' started.
+Test Case '-[PovoXTests.RuleEngineTests testLogsStateAndShapes]' passed (0.028 seconds).
+Test Case '-[PovoXTests.RuleEngineTests testResourcesAreBundled]' started.
+Test Case '-[PovoXTests.RuleEngineTests testResourcesAreBundled]' passed (0.009 seconds).
+Test Case '-[PovoXTests.RuleEngineTests testStandardTemplateDecisions]' started.
+Test Case '-[PovoXTests.RuleEngineTests testStandardTemplateDecisions]' passed (0.010 seconds).
+Test Case '-[PovoXTests.StorageTests testFormatting]' started.
+Test Case '-[PovoXTests.StorageTests testFormatting]' passed (0.010 seconds).
+Test Case '-[PovoXTests.StorageTests testKeychainRoundTrip]' started.
+Test Case '-[PovoXTests.StorageTests testKeychainRoundTrip]' passed (0.073 seconds).
+Test Case '-[PovoXTests.StorageTests testSharedSnapshotRoundTrip]' started.
+Test Case '-[PovoXTests.StorageTests testSharedSnapshotRoundTrip]' passed (0.005 seconds).
+Test Case '-[PovoXUITests.FlowUITests test1_OnboardingLoginAndConfirmFlow]' started.
+Test Case '-[PovoXUITests.FlowUITests test1_OnboardingLoginAndConfirmFlow]' passed (75.368 seconds).
+Test Case '-[PovoXUITests.FlowUITests test2_RulesSimulatorEditor]' started.
+Test Case '-[PovoXUITests.FlowUITests test2_RulesSimulatorEditor]' passed (36.666 seconds).
+Test Case '-[PovoXUITests.FlowUITests test3_CodesShopSettings]' started.
+Test Case '-[PovoXUITests.FlowUITests test3_CodesShopSettings]' passed (51.543 seconds).
+Test Case '-[PovoXUITests.FlowUITests test4_DarkMode]' started.
+Test Case '-[PovoXUITests.FlowUITests test4_DarkMode]' passed (34.076 seconds).
+Test Case '-[PovoXUITests.FlowUITests test5_NotificationConfirm]' started.
+Test Case '-[PovoXUITests.FlowUITests test5_NotificationConfirm]' passed (38.214 seconds).
+Test Case '-[PovoXUITests.FlowUITests test6_AutomationsAndTodayPlan]' started.
+Test Case '-[PovoXUITests.FlowUITests test6_AutomationsAndTodayPlan]' passed (82.539 seconds).

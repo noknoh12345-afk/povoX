@@ -1,0 +1,475 @@
+{
+  "devices" : [
+    {
+      "architecture" : "arm64",
+      "deviceId" : "2911FD29-A09E-4A81-BEA7-99A616FB7FC8",
+      "deviceName" : "iPhone 16",
+      "modelName" : "iPhone 16",
+      "osBuildNumber" : "23C54",
+      "osVersion" : "26.2",
+      "platform" : "iOS Simulator"
+    }
+  ],
+  "testNodes" : [
+    {
+      "children" : [
+        {
+          "children" : [
+            {
+              "children" : [
+                {
+                  "duration" : "0.017s",
+                  "durationInSeconds" : 0.016566991806030273,
+                  "name" : "testBillsReferralProfileThroughBinding()",
+                  "nodeIdentifier" : "AccountTests/testBillsReferralProfileThroughBinding()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/AccountTests/testBillsReferralProfileThroughBinding",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "AccountTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/AccountTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.31s",
+                  "durationInSeconds" : 0.3118729591369629,
+                  "name" : "testLiveRunQueuesConfirmationAndNotifies()",
+                  "nodeIdentifier" : "AutomationTests/testLiveRunQueuesConfirmationAndNotifies()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/AutomationTests/testLiveRunQueuesConfirmationAndNotifies",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.0031s",
+                  "durationInSeconds" : 0.003090977668762207,
+                  "name" : "testNotLoggedInOrHaltedDoesNothing()",
+                  "nodeIdentifier" : "AutomationTests/testNotLoggedInOrHaltedDoesNothing()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/AutomationTests/testNotLoggedInOrHaltedDoesNothing",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.013s",
+                  "durationInSeconds" : 0.013224005699157715,
+                  "name" : "testSimulationUsesSimulatedState()",
+                  "nodeIdentifier" : "AutomationTests/testSimulationUsesSimulatedState()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/AutomationTests/testSimulationUsesSimulatedState",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "AutomationTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/AutomationTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.0069s",
+                  "durationInSeconds" : 0.006863951683044434,
+                  "name" : "testConfirmFlowThroughEngine()",
+                  "nodeIdentifier" : "EngineTests/testConfirmFlowThroughEngine()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/EngineTests/testConfirmFlowThroughEngine",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.0057s",
+                  "durationInSeconds" : 0.0057419538497924805,
+                  "name" : "testLoginSnapshotCatalog()",
+                  "nodeIdentifier" : "EngineTests/testLoginSnapshotCatalog()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/EngineTests/testLoginSnapshotCatalog",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.012s",
+                  "durationInSeconds" : 0.012042045593261719,
+                  "name" : "testTypedErrorAndHalt()",
+                  "nodeIdentifier" : "EngineTests/testTypedErrorAndHalt()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/EngineTests/testTypedErrorAndHalt",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "EngineTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/EngineTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.029s",
+                  "durationInSeconds" : 0.028630971908569336,
+                  "name" : "testAskingAutomationQueuesConfirmation()",
+                  "nodeIdentifier" : "FlowTests/testAskingAutomationQueuesConfirmation()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testAskingAutomationQueuesConfirmation",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.025s",
+                  "durationInSeconds" : 0.02453601360321045,
+                  "name" : "testCalendarAndReservation()",
+                  "nodeIdentifier" : "FlowTests/testCalendarAndReservation()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testCalendarAndReservation",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.022s",
+                  "durationInSeconds" : 0.021798014640808105,
+                  "name" : "testDayPlanFromEngine()",
+                  "nodeIdentifier" : "FlowTests/testDayPlanFromEngine()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testDayPlanFromEngine",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.014s",
+                  "durationInSeconds" : 0.013608932495117188,
+                  "name" : "testFlowLogic()",
+                  "nodeIdentifier" : "FlowTests/testFlowLogic()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testFlowLogic",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "3s",
+                  "durationInSeconds" : 3.2267669439315796,
+                  "name" : "testLearningHolidaysAlarms()",
+                  "nodeIdentifier" : "FlowTests/testLearningHolidaysAlarms()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testLearningHolidaysAlarms",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.016s",
+                  "durationInSeconds" : 0.015866994857788086,
+                  "name" : "testModeShortcutAppliesEffects()",
+                  "nodeIdentifier" : "FlowTests/testModeShortcutAppliesEffects()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testModeShortcutAppliesEffects",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.017s",
+                  "durationInSeconds" : 0.017349958419799805,
+                  "name" : "testNetCountersReadable()",
+                  "nodeIdentifier" : "FlowTests/testNetCountersReadable()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testNetCountersReadable",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.02s",
+                  "durationInSeconds" : 0.020393013954162598,
+                  "name" : "testNothingMatches()",
+                  "nodeIdentifier" : "FlowTests/testNothingMatches()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testNothingMatches",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.016s",
+                  "durationInSeconds" : 0.016227006912231445,
+                  "name" : "testSimulationIncludesFlows()",
+                  "nodeIdentifier" : "FlowTests/testSimulationIncludesFlows()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testSimulationIncludesFlows",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.011s",
+                  "durationInSeconds" : 0.011262059211730957,
+                  "name" : "testTappedShortcutBuysThroughEngine()",
+                  "nodeIdentifier" : "FlowTests/testTappedShortcutBuysThroughEngine()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testTappedShortcutBuysThroughEngine",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "1m 18s",
+                  "durationInSeconds" : 78.55325293540955,
+                  "name" : "testWakeStats()",
+                  "nodeIdentifier" : "FlowTests/testWakeStats()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests/testWakeStats",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "FlowTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/FlowTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.46s",
+                  "durationInSeconds" : 0.457334041595459,
+                  "name" : "testShortcutIntentsRunInApp()",
+                  "nodeIdentifier" : "IntentTests/testShortcutIntentsRunInApp()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/IntentTests/testShortcutIntentsRunInApp",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "IntentTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/IntentTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.0097s",
+                  "durationInSeconds" : 0.009654045104980469,
+                  "name" : "testOptimizeRecommendsCheapestThroughBinding()",
+                  "nodeIdentifier" : "OptimizeTests/testOptimizeRecommendsCheapestThroughBinding()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/OptimizeTests/testOptimizeRecommendsCheapestThroughBinding",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "OptimizeTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/OptimizeTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.014s",
+                  "durationInSeconds" : 0.013787984848022461,
+                  "name" : "testCatalogLoadsAndIsLarge()",
+                  "nodeIdentifier" : "RecipeTests/testCatalogLoadsAndIsLarge()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RecipeTests/testCatalogLoadsAndIsLarge",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.59s",
+                  "durationInSeconds" : 0.5867860317230225,
+                  "name" : "testEveryRecipeCompilesAndChecks()",
+                  "nodeIdentifier" : "RecipeTests/testEveryRecipeCompilesAndChecks()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RecipeTests/testEveryRecipeCompilesAndChecks",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "8s",
+                  "durationInSeconds" : 8.08429503440857,
+                  "name" : "testEveryRecipeRunsWithoutError()",
+                  "nodeIdentifier" : "RecipeTests/testEveryRecipeRunsWithoutError()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RecipeTests/testEveryRecipeRunsWithoutError",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.061s",
+                  "durationInSeconds" : 0.06116795539855957,
+                  "name" : "testRepresentativeRecipeDecisions()",
+                  "nodeIdentifier" : "RecipeTests/testRepresentativeRecipeDecisions()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RecipeTests/testRepresentativeRecipeDecisions",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "RecipeTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RecipeTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.024s",
+                  "durationInSeconds" : 0.02380990982055664,
+                  "name" : "testCatalogComesFromEngine()",
+                  "nodeIdentifier" : "RuleEngineTests/testCatalogComesFromEngine()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RuleEngineTests/testCatalogComesFromEngine",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.098s",
+                  "durationInSeconds" : 0.09847509860992432,
+                  "name" : "testErrorsAreReportedWithLines()",
+                  "nodeIdentifier" : "RuleEngineTests/testErrorsAreReportedWithLines()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RuleEngineTests/testErrorsAreReportedWithLines",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "3s",
+                  "durationInSeconds" : 3.2077879905700684,
+                  "name" : "testInfiniteLoopIsStopped()",
+                  "nodeIdentifier" : "RuleEngineTests/testInfiniteLoopIsStopped()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RuleEngineTests/testInfiniteLoopIsStopped",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.028s",
+                  "durationInSeconds" : 0.028344035148620605,
+                  "name" : "testLogsStateAndShapes()",
+                  "nodeIdentifier" : "RuleEngineTests/testLogsStateAndShapes()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RuleEngineTests/testLogsStateAndShapes",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.0091s",
+                  "durationInSeconds" : 0.009055018424987793,
+                  "name" : "testResourcesAreBundled()",
+                  "nodeIdentifier" : "RuleEngineTests/testResourcesAreBundled()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RuleEngineTests/testResourcesAreBundled",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.0095s",
+                  "durationInSeconds" : 0.009507060050964355,
+                  "name" : "testStandardTemplateDecisions()",
+                  "nodeIdentifier" : "RuleEngineTests/testStandardTemplateDecisions()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RuleEngineTests/testStandardTemplateDecisions",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "RuleEngineTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/RuleEngineTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            },
+            {
+              "children" : [
+                {
+                  "duration" : "0.01s",
+                  "durationInSeconds" : 0.010014057159423828,
+                  "name" : "testFormatting()",
+                  "nodeIdentifier" : "StorageTests/testFormatting()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/StorageTests/testFormatting",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.073s",
+                  "durationInSeconds" : 0.07293498516082764,
+                  "name" : "testKeychainRoundTrip()",
+                  "nodeIdentifier" : "StorageTests/testKeychainRoundTrip()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/StorageTests/testKeychainRoundTrip",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.0052s",
+                  "durationInSeconds" : 0.005212068557739258,
+                  "name" : "testSharedSnapshotRoundTrip()",
+                  "nodeIdentifier" : "StorageTests/testSharedSnapshotRoundTrip()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/StorageTests/testSharedSnapshotRoundTrip",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "StorageTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests/StorageTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            }
+          ],
+          "name" : "PovoXTests",
+          "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXTests",
+          "nodeType" : "Unit test bundle",
+          "result" : "Passed"
+        },
+        {
+          "children" : [
+            {
+              "children" : [
+                {
+                  "duration" : "1m 15s",
+                  "durationInSeconds" : 75.36837100982666,
+                  "name" : "test1_OnboardingLoginAndConfirmFlow()",
+                  "nodeIdentifier" : "FlowUITests/test1_OnboardingLoginAndConfirmFlow()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests/FlowUITests/test1_OnboardingLoginAndConfirmFlow",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "36s",
+                  "durationInSeconds" : 36.666074991226196,
+                  "name" : "test2_RulesSimulatorEditor()",
+                  "nodeIdentifier" : "FlowUITests/test2_RulesSimulatorEditor()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests/FlowUITests/test2_RulesSimulatorEditor",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "51s",
+                  "durationInSeconds" : 51.54303598403931,
+                  "name" : "test3_CodesShopSettings()",
+                  "nodeIdentifier" : "FlowUITests/test3_CodesShopSettings()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests/FlowUITests/test3_CodesShopSettings",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "34s",
+                  "durationInSeconds" : 34.07556700706482,
+                  "name" : "test4_DarkMode()",
+                  "nodeIdentifier" : "FlowUITests/test4_DarkMode()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests/FlowUITests/test4_DarkMode",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "38s",
+                  "durationInSeconds" : 38.21420407295227,
+                  "name" : "test5_NotificationConfirm()",
+                  "nodeIdentifier" : "FlowUITests/test5_NotificationConfirm()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests/FlowUITests/test5_NotificationConfirm",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "1m 22s",
+                  "durationInSeconds" : 82.53889298439026,
+                  "name" : "test6_AutomationsAndTodayPlan()",
+                  "nodeIdentifier" : "FlowUITests/test6_AutomationsAndTodayPlan()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests/FlowUITests/test6_AutomationsAndTodayPlan",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "FlowUITests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests/FlowUITests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            }
+          ],
+          "name" : "PovoXUITests",
+          "nodeIdentifierURL" : "test://com.apple.xcode/PovoX/PovoXUITests",
+          "nodeType" : "UI test bundle",
+          "result" : "Passed"
+        }
+      ],
+      "name" : "PovoX",
+      "nodeType" : "Test Plan",
+      "result" : "Passed"
+    }
+  ],
+  "testPlanConfigurations" : [
+    {
+      "configurationId" : "1",
+      "configurationName" : "Test Scheme Action"
+    }
+  ]
+}

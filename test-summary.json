@@ -1,0 +1,46 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "2911FD29-A09E-4A81-BEA7-99A616FB7FC8",
+        "deviceName" : "iPhone 16",
+        "modelName" : "iPhone 16",
+        "osBuildNumber" : "23C54",
+        "osVersion" : "26.2",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 0,
+      "passedTests" : 39,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "PovoX · Built with macOS 15.7.9",
+  "expectedFailures" : 0,
+  "failedTests" : 0,
+  "finishTime" : 1792162777.523,
+  "passedTests" : 39,
+  "result" : "Passed",
+  "skippedTests" : 0,
+  "startTime" : 1792162172.36,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+
+  ],
+  "title" : "Test - PovoX",
+  "topInsights" : [
+    {
+      "category" : "Longest Test Runs",
+      "impact" : "83% of duration",
+      "text" : "1 longest test run with outlier durations exceeding 43.28s (three standard deviations)"
+    }
+  ],
+  "totalTestCount" : 39
+}
