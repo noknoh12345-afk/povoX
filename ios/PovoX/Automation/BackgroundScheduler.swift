@@ -13,11 +13,14 @@ enum BackgroundScheduler {
         guard Runtime.backgroundTasksAvailable else { return }
         for id in [refreshID, processingID] {
             BGTaskScheduler.shared.register(forTaskWithIdentifier: id, using: nil) { task in
+                // 第1段の測定: 頼んだ時刻(earliestBeginDate)に対して、実際にいつ起こされたか
+                WakeRecorder.record("bg-launch", source: task.identifier, requested: nextScheduled)
                 let work = Task {
                     let ok = await run()
                     task.setTaskCompleted(success: ok)
                 }
                 task.expirationHandler = {
+                    WakeRecorder.record("bg-expired", source: task.identifier, withNet: false)
                     // povo への通信は途中で切らない(エンジンが1本ずつ・送る前に記録している)。
                     work.cancel()
                 }

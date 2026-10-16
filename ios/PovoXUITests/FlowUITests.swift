@@ -236,7 +236,8 @@ final class FlowUITests: XCTestCase {
         wait(app.switches["flowToggle.g.low.100"], 10)
 
         // エディタ: 新しいオートメーション → 通知を足して保存
-        app.buttons["flows.add"].tap()
+        // ナビゲーションバーのボタンは「スクロールして表示」が効かないことがあるので、座標で押す
+        wait(app.buttons["flows.add"]).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let newAutomation = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "新しいオートメーション")).firstMatch
         wait(newAutomation).tap()
         wait(app.buttons["flowEditor.trigger"])
@@ -258,6 +259,17 @@ final class FlowUITests: XCTestCase {
         tab(app, "ホーム")
         XCTAssertTrue(app.staticTexts["使い放題中"].waitForExistence(timeout: 25), "ショートカットで購入されていない")
         shot(app, "58-home-after-shortcut")
+
+        // 設定 → 計測と書き出し(第1段の数字・検証用の書き出し)
+        tab(app, "設定")
+        let export = app.buttons["settings.export"]
+        for _ in 0..<4 where !export.exists { app.swipeUp() }
+        if export.waitForExistence(timeout: 5) {
+            export.tap()
+            wait(app.buttons["export.build"]).tap()
+            XCTAssertTrue(app.descendants(matching: .any)["export.share"].waitForExistence(timeout: 20), "書き出しのファイルが作れない")
+            shot(app, "59-export")
+        }
     }
 
     // 4. ダークモード

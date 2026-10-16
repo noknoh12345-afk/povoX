@@ -17,7 +17,9 @@ struct PovoXApp: App {
         .onChange(of: phase) { _, p in
             switch p {
             case .active:
+                WakeRecorder.record("app-active")
                 Task {
+                    await WakeRecorder.collectDelivered()
                     await store.reload()
                     await store.refresh(force: false)
                     store.startForeground()

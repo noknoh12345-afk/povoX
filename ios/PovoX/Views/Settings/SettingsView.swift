@@ -104,6 +104,10 @@ struct SettingsView: View {
                         LabeledContent("オートメーション", value: "\(store.flows.filter(\.enabled).count)個 オン")
                     }
                     .foregroundStyle(.primary)
+                    NavigationLink { ExportView() } label: {
+                        Label("計測と書き出し(検証用)", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("settings.export")
                 } header: {
                     Text("予定とオートメーション")
                 } footer: {

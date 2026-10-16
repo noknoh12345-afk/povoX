@@ -23,6 +23,12 @@ enum FlowScheduler {
         let pending = await center.pendingNotificationRequests()
         let old = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
         center.removePendingNotificationRequests(withIdentifiers: old)
+        // 測定: 予約したのに入れ直しで外れた回(届かなくて当然のもの)を、届かなかった数に入れないため
+        let keep = enabled ? Set(items.map { "\($0.id)@\(Int64($0.fireAt.timeIntervalSince1970 * 1000))" }) : []
+        for r in pending where r.identifier.hasPrefix(prefix) {
+            guard let at = (r.content.userInfo["at"] as? NSNumber)?.int64Value, !keep.contains("\(r.identifier)@\(at)") else { continue }
+            WakeRecorder.cancelled(id: r.identifier, at: at)
+        }
         guard enabled else { return }
         for it in items {
             let interval = it.fireAt.timeIntervalSince(now)
@@ -31,13 +37,15 @@ enum FlowScheduler {
             content.title = it.title
             content.body = it.body
             content.sound = .default
-            content.userInfo = ["kind": "flow", "flow_id": it.flowID, "occ": it.occurrence, "route": "home"]
+            content.userInfo = ["kind": "flow", "flow_id": it.flowID, "occ": it.occurrence, "route": "home",
+                                "at": NSNumber(value: Int64(it.fireAt.timeIntervalSince1970 * 1000))]
             if it.runnable {
                 content.categoryIdentifier = category
                 content.interruptionLevel = .timeSensitive
             }
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
             try? await center.add(UNNotificationRequest(identifier: it.id, content: content, trigger: trigger))
+            WakeRecorder.scheduled(id: it.id, fireAt: it.fireAt)
         }
     }
 

@@ -54,6 +54,8 @@ final class AppServices {
     let calendar = CalendarService()
     /// オートメーション(内蔵のショートカット)。
     let flows: FlowStore
+    /// 第1段の測定(起こされた時刻・通知の配信・通信量カウンタ)。
+    let wakeLog: WakeLog
     private(set) lazy var automation: AutomationService = makeAutomation()
 
     private let lock = NSLock()
@@ -79,6 +81,8 @@ final class AppServices {
         }
         AppSettings.shared = settings
         flows = FlowStore(defaults: settings.defaults)
+        wakeLog = WakeLog(defaults: settings.defaults)
+        WakeRecorder.log = wakeLog
         flows.seedIfNeeded()
         if launch.demoCalendar { calendar.demoEvents = CalendarService.demo() }
         device.override = launch.device
@@ -138,7 +142,10 @@ final class AppServices {
             device: { [unowned self] in await self.device.current() },
             settings: { [unowned self] in self.settings },
             notify: { [unowned self] list in await self.notifications.post(list) },
-            afterRun: { [unowned self] record in await self.afterChange(summary: record.summary) },
+            afterRun: { [unowned self] record in
+                WakeRecorder.record("run", source: record.trigger, at: Date(timeIntervalSince1970: Double(record.startedMs) / 1000))
+                await self.afterChange(summary: record.summary)
+            },
             flows: { [unowned self] in self.flows },
             calendar: { [unowned self] in
                 let c = self.calendar
@@ -202,6 +209,7 @@ final class AppServices {
         let c = client
         await WidgetBridge.update(client: c, lastSummary: summary)
         var delay = await c.value { $0.nextCheckDelayMin() }
+        await WakeRecorder.collectDelivered()
         let nextFlow = await rescheduleFlows()
         if let next = nextFlow {
             // 時刻・予定のオートメーションに間に合うよう、バックグラウンド更新を早める

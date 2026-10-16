@@ -3,8 +3,9 @@
 use crate::jptime;
 use crate::model::{UsageInsights, UsageSample};
 
-const KEEP_MS: i64 = 14 * 24 * 3600 * 1000;
-const MAX_SAMPLES: usize = 4000;
+/// 予定と照らしたバックテストに使うので長めに残す(15分おきでも約1万件・1MB 程度)。
+const KEEP_MS: i64 = 120 * 24 * 3600 * 1000;
+const MAX_SAMPLES: usize = 20_000;
 /// 同じ値なら、この間隔より短く記録しない。
 const MIN_GAP_MS: i64 = 5 * 60 * 1000;
 /// 増えた(購入・コード)とみなす量。
@@ -144,6 +145,17 @@ mod tests {
         record(&mut h, s(0.02, 0.9)); // 値が変わった
         record(&mut h, s(0.01, 0.8)); // 時間が戻った
         assert_eq!(h.len(), 2);
+    }
+
+    #[test]
+    fn keeps_long_history_for_backtests() {
+        let mut h = vec![];
+        for i in 0..(100 * 24) {
+            record(&mut h, s(i as f64, 100.0 - i as f64 * 0.01));
+        }
+        assert_eq!(h.len(), 100 * 24, "100日分は消えない");
+        record(&mut h, s((130 * 24) as f64, 1.0));
+        assert!(h.first().unwrap().t_ms >= (10 * 24) as i64 * H, "120日より古いものは消える");
     }
 
     #[test]

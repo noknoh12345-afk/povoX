@@ -8,6 +8,18 @@ final class FlowTests: XCTestCase {
         FlowLogicChecks.run { XCTFail($0) }
     }
 
+    /// 第1段の測定の集計(パソコン上の検査と同じもの)。
+    func testWakeStats() {
+        WakeChecks.run { XCTFail($0) }
+    }
+
+    /// 通信量カウンタが読める(シミュレータでも en* はある)。
+    func testNetCountersReadable() {
+        let s = NetCounters.read()
+        XCTAssertNotNil(s)
+        XCTAssertGreaterThan(s?.bootMs ?? 0, 0)
+    }
+
     private func store(_ flows: [Flow]) -> FlowStore {
         let s = FlowStore(defaults: UserDefaults(suiteName: "povox-flowtest-\(UUID().uuidString)")!)
         s.save(flows)

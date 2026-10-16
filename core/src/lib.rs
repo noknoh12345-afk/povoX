@@ -12,6 +12,7 @@ mod backend;
 mod catalog;
 mod engine;
 mod error;
+mod export;
 mod history;
 mod jptime;
 mod mock;
@@ -112,6 +113,11 @@ impl PovoEngine {
     pub fn cached_catalog(&self) -> Option<Catalog> {
         self.lock().cached_catalog()
     }
+    /// 検証用の書き出し(JSON)。include_purchases なら povo 公式の購入履歴も読む(通信1回)。
+    pub fn export_json(&self, include_purchases: bool) -> String {
+        self.write(|e| e.export_json(include_purchases))
+    }
+
     pub fn purchase_history(&self) -> Result<Vec<Purchase>, PovoXError> {
         self.write(|e| e.purchase_history()).map_err(Into::into)
     }
