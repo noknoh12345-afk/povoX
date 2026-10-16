@@ -91,6 +91,81 @@ struct SetPurchaseModeIntent: AppIntent {
     }
 }
 
+// MARK: - オートメーション(内蔵のショートカット)をショートカット App・Siri から
+
+/// povoX のオートメーション(ショートカット App で選べる形)。
+struct FlowEntity: AppEntity {
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "povoXのオートメーション"
+    static var defaultQuery = FlowEntityQuery()
+
+    var id: String
+    var name: String
+    var summary: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)", subtitle: "\(summary)")
+    }
+
+    init(_ f: Flow) {
+        id = f.id
+        name = f.name
+        summary = FlowText.summary(f)
+    }
+}
+
+struct FlowEntityQuery: EntityQuery {
+    func entities(for identifiers: [String]) async throws -> [FlowEntity] {
+        let list = AppServices.shared.flows.flows()
+        return identifiers.compactMap { id in list.first { $0.id == id }.map(FlowEntity.init) }
+    }
+
+    func suggestedEntities() async throws -> [FlowEntity] {
+        // ボタンで実行するものを先に
+        AppServices.shared.flows.flows()
+            .sorted { ($0.trigger.kind == .manual ? 0 : 1, $0.createdMs) < ($1.trigger.kind == .manual ? 0 : 1, $1.createdMs) }
+            .map(FlowEntity.init)
+    }
+}
+
+/// ショートカット: povoX のオートメーションを1つ実行する(きっかけは見ない。条件と安全装置は通る)。
+struct RunFlowIntent: AppIntent {
+    static var title: LocalizedStringResource = "povoXのオートメーションを実行"
+    static var description = IntentDescription("povoX に作ったオートメーション(例: 1時間使い放題・いってきます)を実行します。購入は povoX の設定・上限の範囲だけで行います。")
+    static var openAppWhenRun = false
+    // お金が動くことがあるので、ロック中は解除してから
+    static var authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
+
+    @Parameter(title: "オートメーション")
+    var flow: FlowEntity
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let services = AppServices.shared
+        guard let record = await services.automation.run(trigger: "flow:\(flow.id)") else {
+            let st = await services.client.value { $0.status() }
+            let why = !st.loggedIn ? "ログインしていません" : (st.halted != nil ? "安全のため通信を止めています。アプリで確認してください" : "別の自動チェックが動いています")
+            return .result(value: why, dialog: IntentDialog(stringLiteral: why))
+        }
+        let text = record.error.map { "エラー: \($0)" } ?? record.summary
+        return .result(value: text, dialog: IntentDialog(stringLiteral: "\(flow.name): \(text)"))
+    }
+}
+
+/// ショートカット: 今日(夕方からは明日)のプランを返す。
+struct DayPlanIntent: AppIntent {
+    static var title: LocalizedStringResource = "povoXの今日のプラン"
+    static var description = IntentDescription("カレンダーの予定と残量から、今日(18時からは明日)の外出に足りるか・何をしておくと楽かを返します。")
+    static var openAppWhenRun = false
+
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let services = AppServices.shared
+        guard let f = await services.planFacts() else { throw IntentFailure(message: "ログインしていません") }
+        guard f.calendarAuthorized else { throw IntentFailure(message: "povoX でカレンダーを許可してください") }
+        let b = DayPlanner.brief(day: "auto", facts: f)
+        let text = b.map { "\($0.title.replacingOccurrences(of: "povoX: ", with: "")): \($0.body)" } ?? "プランを作れませんでした"
+        return .result(value: text, dialog: IntentDialog(stringLiteral: text))
+    }
+}
+
 struct IntentFailure: Error, CustomLocalizedStringResourceConvertible {
     let message: String
     var localizedStringResource: LocalizedStringResource { LocalizedStringResource(stringLiteral: message) }
@@ -106,5 +181,9 @@ struct PovoXShortcuts: AppShortcutsProvider {
                     phrases: ["\(.applicationName)の残量", "\(.applicationName)であと何ギガ"],
                     shortTitle: "データ残量",
                     systemImageName: "antenna.radiowaves.left.and.right")
+        AppShortcut(intent: DayPlanIntent(),
+                    phrases: ["\(.applicationName)の今日のプラン", "\(.applicationName)で今日の予定を確認"],
+                    shortTitle: "今日のプラン",
+                    systemImageName: "calendar.badge.checkmark")
     }
 }

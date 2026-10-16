@@ -15,6 +15,8 @@ struct LaunchOptions {
     var device: DeviceState?
     /// UI テストでも通知を使う(通知のボタンの確認用)。
     var uiTestNotifications = false
+    /// デモの予定を使う(カレンダーの代わり)。
+    var demoCalendar = false
 
     static let current: LaunchOptions = {
         let args = ProcessInfo.processInfo.arguments
@@ -31,6 +33,7 @@ struct LaunchOptions {
         o.skipOnboarding = args.contains("-skipOnboarding")
         o.tab = value("-tab")
         o.uiTestNotifications = args.contains("-uitestNotifications")
+        o.demoCalendar = args.contains("-demoCalendar")
         if let b = value("-deviceBattery") {
             o.device = DeviceState(batteryLevel: Int(b), charging: args.contains("-deviceCharging"), full: false, lowPower: false,
                                    network: value("-deviceNetwork") ?? "cellular")
@@ -48,6 +51,9 @@ final class AppServices {
     let notifications = NotificationService()
     let device = DeviceMonitor()
     let location = LocationMonitor()
+    let calendar = CalendarService()
+    /// オートメーション(内蔵のショートカット)。
+    let flows: FlowStore
     private(set) lazy var automation: AutomationService = makeAutomation()
 
     private let lock = NSLock()
@@ -72,6 +78,9 @@ final class AppServices {
             settings = AppSettings(defaults: .standard)
         }
         AppSettings.shared = settings
+        flows = FlowStore(defaults: settings.defaults)
+        flows.seedIfNeeded()
+        if launch.demoCalendar { calendar.demoEvents = CalendarService.demo() }
         device.override = launch.device
         _client = makeClient(mock: settings.mockMode)
         wireNotifications()
@@ -129,15 +138,76 @@ final class AppServices {
             device: { [unowned self] in await self.device.current() },
             settings: { [unowned self] in self.settings },
             notify: { [unowned self] list in await self.notifications.post(list) },
-            afterRun: { [unowned self] record in await self.afterChange(summary: record.summary) }
+            afterRun: { [unowned self] record in await self.afterChange(summary: record.summary) },
+            flows: { [unowned self] in self.flows },
+            calendar: { [unowned self] in
+                let c = self.calendar
+                return (c.events(), c.authorized)
+            },
+            applyEffects: { [unowned self] effects in await self.apply(effects) },
+            flowsFired: { firings in
+                for f in firings {
+                    if let occ = f.occurrence { FlowScheduler.remove(flowID: f.flow.id, occurrence: occ) }
+                }
+            }
         ))
+    }
+
+    /// オートメーションの「設定を変える」アクション。
+    func apply(_ effects: [FlowEffect]) async {
+        let c = client
+        for e in effects {
+            switch e {
+            case .purchaseMode(let m):
+                let mode = ActionMode.named(m)
+                _ = await c.value { e -> Settings in
+                    var s = e.settings()
+                    s.purchaseMode = mode
+                    return e.updateSettings(settings: s)
+                }
+            case .codeMode(let m):
+                let mode = ActionMode.named(m)
+                _ = await c.value { e -> Settings in
+                    var s = e.settings()
+                    s.codeMode = mode
+                    return e.updateSettings(settings: s)
+                }
+            case .flowEnabled(let id, let on):
+                flows.setEnabled(id, on)
+            }
+        }
+        await MainActor.run { NotificationCenter.default.post(name: .povoxFlowsChanged, object: nil) }
+    }
+
+    /// 時刻・予定のオートメーションの通知を入れ直し、次に動く時刻を返す(通信しない)。
+    @discardableResult
+    func rescheduleFlows() async -> Date? {
+        let enabled = notifications.enabled
+        let c = client
+        guard let ctx = try? await c.call({ try $0.ruleContextJson(mode: .simulate, sim: nil) }) else {
+            await FlowScheduler.apply([], enabled: false)
+            return nil
+        }
+        let dev = await device.current()
+        let merged = RuleContextBuilder.merge(engineContextJSON: ctx, trigger: "schedule", device: dev, now: Date())
+        let facts = AutomationService.makeFacts(contextJSON: merged, calendar: (calendar.events(), calendar.authorized), settings: settings)
+        let list = flows.flows()
+        let memory = flows.memory()
+        await FlowScheduler.apply(FlowEngine.schedule(flows: list, facts: facts, memory: memory), enabled: enabled)
+        return FlowEngine.nextDue(flows: list, facts: facts, memory: memory)
     }
 
     /// 実行・確認のあと: ウィジェットを更新し、次の自動チェックを予約し、画面に知らせる。
     func afterChange(summary: String?) async {
         let c = client
         await WidgetBridge.update(client: c, lastSummary: summary)
-        let delay = await c.value { $0.nextCheckDelayMin() }
+        var delay = await c.value { $0.nextCheckDelayMin() }
+        let nextFlow = await rescheduleFlows()
+        if let next = nextFlow {
+            // 時刻・予定のオートメーションに間に合うよう、バックグラウンド更新を早める
+            let minutes = max(15, Int(next.timeIntervalSinceNow / 60))
+            delay = min(delay, UInt32(minutes))
+        }
         if !launch.uiTest {
             BackgroundScheduler.schedule(afterMinutes: delay, enabled: settings.backgroundEnabled)
         }
@@ -161,6 +231,11 @@ final class AppServices {
         notifications.onLog = { [unowned self] text in
             self.client.engine.log(level: .info, message: text)
         }
+        notifications.onRunFlow = { [unowned self] id, occ in
+            var args: [String: String] = [:]
+            if let occ { args["occ"] = occ }
+            _ = await self.automation.run(trigger: "flow:\(id)", args: args)
+        }
         notifications.onOpen = { info in
             NotificationCenter.default.post(name: .povoxOpenRoute, object: nil, userInfo: info)
         }
@@ -170,4 +245,6 @@ final class AppServices {
 extension Notification.Name {
     /// 通知をタップした(画面を切り替える合図)。
     static let povoxOpenRoute = Notification.Name("povoxOpenRoute")
+    /// オートメーションが変わった(画面を読み直す合図)。
+    static let povoxFlowsChanged = Notification.Name("povoxFlowsChanged")
 }

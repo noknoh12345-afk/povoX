@@ -14,9 +14,10 @@ struct HomeView: View {
                     ForEach(store.pending) { p in
                         PendingCard(pending: p)
                     }
-                    UsageChartCard(history: store.history, insights: store.insights, snapshot: store.snapshot)
-                    HomeOptimizeCard()
                     QuickActions(showShop: $showShop)
+                    TodayPlanCard()
+                    HomeShortcuts()
+                    UsageChartCard(history: store.history, insights: store.insights, snapshot: store.snapshot)
                     if let run = store.runs.first {
                         LastRunCard(run: run)
                     }
@@ -402,7 +403,14 @@ enum RunText {
         case "foreground": return "アプリ表示中"
         case "manual": return "手動"
         case "試運転": return "試運転"
-        default: return "ショートカット(\(t))"
+        case "location-arrive": return "位置情報(到着)"
+        case "location-leave", "location": return "位置情報(移動)"
+        default:
+            if let id = AutomationService.forcedFlowID(t) {
+                let name = AppServices.shared.flows.flow(id)?.name ?? "その場の実行"
+                return "オートメーション「\(name)」"
+            }
+            return "ショートカット(\(t))"
         }
     }
 }

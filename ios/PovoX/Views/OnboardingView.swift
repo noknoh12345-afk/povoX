@@ -14,8 +14,8 @@ struct OnboardingView: View {
     private let pages = [
         Page(icon: "gauge.with.dots.needle.67percent", title: "povo の残量を見守る",
              body: "残量を取りつづけて、減り方から「このペースであと何時間もつか」を予測します。ホーム画面とロック画面のウィジェットにも出せます。"),
-        Page(icon: "curlybraces.square", title: "足りなくなりそうなら補充",
-             body: "残りが少なくなったら、手持ちのコードを入れたり、使い放題やデータ追加を買ったりします。何をするかは「ルール」で自由に決められます(電池が少ないときは1時間だけ、など)。"),
+        Page(icon: "calendar.badge.checkmark", title: "予定に合わせて、先回り",
+             body: "カレンダーの予定から外出を見つけ、残量で足りるか・出かける前に何を入れておくと楽かを教えます。「残りが少ないとき」「予定の30分前」などのオートメーションも最初から入っています。"),
         Page(icon: "hand.raised", title: "勝手には買いません",
              body: "最初は「通知で確認」になっています。実行する前に通知で聞くので、ロック画面の「実行する」を押したときだけ行います。月の上限金額・1日の回数も決められます。"),
     ]
@@ -58,7 +58,7 @@ struct OnboardingView: View {
                     Button("はじめる") { Task { await store.finishOnboarding() } }
                         .buttonStyle(PrimaryButtonStyle())
                         .accessibilityIdentifier("onboarding.start")
-                    Text("通知の許可を求めます。確認の通知に必要です。")
+                    Text("通知とカレンダーの許可を求めます。予定は端末の中だけで使います。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

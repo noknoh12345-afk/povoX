@@ -508,3 +508,62 @@ fn bills_referral_profile() {
     assert_eq!(p.plan.as_deref(), Some("povo2.0"));
     assert_eq!(p.status.as_deref(), Some("Active"));
 }
+
+fn run_trig(e: &mut Engine, trigger: &str, plan: Value) -> RunRecord {
+    e.execute_run(RunInput {
+        trigger: trigger.into(),
+        mode: RunMode::Live,
+        battery_level: Some(50),
+        charging: false,
+        network: "cellular".into(),
+        plan_json: Some(plan.to_string()),
+        error: None,
+        script_logs: vec![],
+        sim: None,
+    })
+}
+
+#[test]
+fn confirm_flag_from_automations() {
+    // confirm:true は「自動」設定でも必ず確認待ちにする(オートメーションの「実行前に確認」)
+    let (mut e, _) = engine("low");
+    login(&mut e);
+    e.catalog(false).unwrap();
+    set(&mut e, |s| s.purchase_mode = ActionMode::Auto);
+    let r = run(&mut e, RunMode::Live, json!({"type": "buy", "sku": "MOCK_UNLIMITED_1H", "confirm": true}));
+    assert_eq!(status_of(&r, ActionKind::Buy), vec![OutcomeStatus::Queued]);
+    assert!(e.ledger(10).is_empty());
+
+    // confirm:false は、利用者がその場で押した実行(flow:)のときだけ確認を飛ばす
+    let (mut e, _) = engine("low");
+    login(&mut e);
+    e.catalog(false).unwrap();
+    // ルールなど(flow: 以外)では無視 → 既定の「通知で確認」
+    let r = run_trig(&mut e, "background", json!({"type": "buy", "sku": "MOCK_UNLIMITED_1H", "confirm": false}));
+    assert_eq!(status_of(&r, ActionKind::Buy), vec![OutcomeStatus::Queued]);
+    let pid = r.outcomes[0].pending_id.clone().unwrap();
+    e.dismiss_pending(&pid);
+    let r = run_trig(&mut e, "flow:abc", json!({"type": "buy", "sku": "MOCK_UNLIMITED_1H", "confirm": false}));
+    assert_eq!(status_of(&r, ActionKind::Buy), vec![OutcomeStatus::Done], "{}", r.outcomes[0].message);
+    // 上限などの安全装置はそのまま
+    set(&mut e, |s| s.monthly_cap_yen = 150);
+    e.clock = Some(T0 + 600_000);
+    let r = run_trig(&mut e, "flow:abc", json!({"type": "buy", "sku": "MOCK_UNLIMITED_1H", "confirm": false}));
+    assert!(r.outcomes[0].message.contains("上限"), "{}", r.outcomes[0].message);
+    // 「しない」は flow: でも買わない
+    set(&mut e, |s| {
+        s.monthly_cap_yen = 5000;
+        s.purchase_mode = ActionMode::Off;
+    });
+    let r = run_trig(&mut e, "flow:abc", json!({"type": "buy", "sku": "MOCK_UNLIMITED_1H", "confirm": false}));
+    assert_eq!(status_of(&r, ActionKind::Buy), vec![OutcomeStatus::Refused]);
+    // コードも同じ(使い放題中は送らないので、新しい回線で)
+    let (mut e, _) = engine("low");
+    login(&mut e);
+    e.add_codes("MOCKOK1", None);
+    let r = run_trig(&mut e, "background", json!({"type": "applyCode", "confirm": false}));
+    assert_eq!(status_of(&r, ActionKind::ApplyCode), vec![OutcomeStatus::Queued]);
+    e.dismiss_pending(&r.outcomes[0].pending_id.clone().unwrap());
+    let r = run_trig(&mut e, "flow:abc", json!({"type": "applyCode", "confirm": false}));
+    assert_eq!(status_of(&r, ActionKind::ApplyCode), vec![OutcomeStatus::Done], "{}", r.outcomes[0].message);
+}

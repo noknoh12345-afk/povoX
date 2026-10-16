@@ -9,6 +9,10 @@
 //!   {"type":"notify","title":"…","body":"…"}      通知を出す
 //!   {"type":"applyCode","tag":"1gb"} / {"id":"…"} 手持ちのコードを1件使う
 //!   {"type":"buy","sku":"…"}                      トッピングを買う
+//!   (buy / applyCode には "confirm" を付けられる:
+//!     true  = 設定が「自動」でも必ず通知で確認する(オートメーションの「実行前に確認」)
+//!     false = 利用者がその場で押した実行(きっかけが "flow:" で始まる実行)だけ、「通知で確認」を飛ばす。
+//!             設定が「しない」なら買わない・上限などの安全装置はそのまま。ルールの実行では無視する)
 //!   {"type":"firstOf","items":[…]}                上から順に、最初にできたものだけ
 //!   {"type":"all","items":[…]}                    全部(ただし購入・コードは1回の実行で1つまで)
 
@@ -42,11 +46,15 @@ pub enum PlanNode {
         tag: Option<String>,
         #[serde(default)]
         id: Option<String>,
+        #[serde(default)]
+        confirm: Option<bool>,
     },
     #[serde(rename = "buy")]
     Buy {
         #[serde(default)]
         sku: Option<String>,
+        #[serde(default)]
+        confirm: Option<bool>,
     },
     #[serde(rename = "firstOf")]
     FirstOf {
@@ -101,6 +109,8 @@ enum Flow {
 
 struct Exec {
     mode: RunMode,
+    /// 利用者がその場で押した実行(オートメーションのボタン・通知の「実行する」・予約)。
+    user_initiated: bool,
     run_id: String,
     sim: Option<SimInput>,
     /// 購入・コードをこの実行で使ったか(1回の実行で1つまで)。
@@ -162,7 +172,8 @@ impl Engine {
                 rec.error = Some(e);
             }
             Ok(plan) => {
-                let mut ex = Exec { mode: input.mode, run_id: id, sim: input.sim.clone(), spent: false, outcomes: vec![] };
+                let user_initiated = input.trigger.starts_with("flow:");
+                let mut ex = Exec { mode: input.mode, user_initiated, run_id: id, sim: input.sim.clone(), spent: false, outcomes: vec![] };
                 self.exec_node(&mut ex, &plan);
                 rec.outcomes = ex.outcomes;
                 rec.summary = summarize(&rec.outcomes);
@@ -203,8 +214,8 @@ impl Engine {
                 o.body = Some(body);
                 Flow::Acted
             }
-            PlanNode::Buy { sku } => self.exec_buy(ex, sku.as_deref()),
-            PlanNode::ApplyCode { tag, id } => self.exec_code(ex, tag.as_deref(), id.as_deref()),
+            PlanNode::Buy { sku, confirm } => self.exec_buy(ex, sku.as_deref(), *confirm),
+            PlanNode::ApplyCode { tag, id, confirm } => self.exec_code(ex, tag.as_deref(), id.as_deref(), *confirm),
             PlanNode::FirstOf { items } => {
                 for it in items {
                     match self.exec_node(ex, it) {
@@ -229,6 +240,17 @@ impl Engine {
                     Flow::Passed
                 }
             }
+        }
+    }
+
+    /// 設定と、計画の "confirm" から、この1件の実行のしかたを決める。
+    /// 「しない」は何があっても「しない」。確認を飛ばせるのは利用者がその場で押した実行だけ。
+    fn effective_mode(base: ActionMode, confirm: Option<bool>, ex: &Exec) -> ActionMode {
+        match (base, confirm) {
+            (ActionMode::Off, _) => ActionMode::Off,
+            (ActionMode::Auto, Some(true)) => ActionMode::Confirm,
+            (ActionMode::Confirm, Some(false)) if ex.user_initiated => ActionMode::Auto,
+            (m, _) => m,
         }
     }
 
@@ -269,12 +291,12 @@ impl Engine {
         Ok(price)
     }
 
-    fn exec_buy(&mut self, ex: &mut Exec, sku: Option<&str>) -> Flow {
+    fn exec_buy(&mut self, ex: &mut Exec, sku: Option<&str>, confirm: Option<bool>) -> Flow {
         let Some(sku) = sku.map(str::trim).filter(|s| !s.is_empty()) else {
             ex.push(ActionKind::Buy, OutcomeStatus::Refused, "購入", "買う商品が見つかりませんでした。");
             return Flow::Passed;
         };
-        let mode = self.st.settings.purchase_mode;
+        let mode = Self::effective_mode(self.st.settings.purchase_mode, confirm, ex);
         if mode == ActionMode::Off {
             ex.push(ActionKind::Buy, OutcomeStatus::Refused, format!("購入 {sku}"), "設定で、ルールによる購入はオフです。");
             return Flow::Passed;
@@ -375,8 +397,8 @@ impl Engine {
             })
     }
 
-    fn exec_code(&mut self, ex: &mut Exec, tag: Option<&str>, id: Option<&str>) -> Flow {
-        let mode = self.st.settings.code_mode;
+    fn exec_code(&mut self, ex: &mut Exec, tag: Option<&str>, id: Option<&str>, confirm: Option<bool>) -> Flow {
+        let mode = Self::effective_mode(self.st.settings.code_mode, confirm, ex);
         if mode == ActionMode::Off {
             ex.push(ActionKind::ApplyCode, OutcomeStatus::Refused, "コード", "設定で、ルールによるコード適用はオフです。");
             return Flow::Passed;

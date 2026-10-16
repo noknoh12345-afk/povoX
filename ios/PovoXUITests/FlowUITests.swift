@@ -93,7 +93,8 @@ final class FlowUITests: XCTestCase {
         let app = launch(["-skipOnboarding", "-deviceBattery", "80", "-deviceNetwork", "cellular"])
         login(app)
         shot(app, "10-home-normal")
-        tab(app, "ルール")
+        tab(app, "自動化")
+        wait(app.buttons["flows.rules"]).tap()
         wait(app.buttons["rules.simulator"])
         shot(app, "11-rules")
         app.buttons["rules.dryRun"].tap()
@@ -203,6 +204,62 @@ final class FlowUITests: XCTestCase {
         }
     }
 
+    // 6. 自動化: ショートカット・オートメーション・ギャラリー・エディタ・今日のプラン・ホームのボタン
+    func test6_AutomationsAndTodayPlan() {
+        let app = launch(["-skipOnboarding", "-demoCalendar", "-mockScenario", "low", "-deviceBattery", "70", "-deviceNetwork", "cellular"])
+        login(app)
+
+        // ホーム: 今日のプラン(デモの予定: ライブ)と、ホームに置いたショートカット
+        let headline = wait(app.staticTexts["today.headline"], 20)
+        XCTAssertTrue(headline.label.contains("外出") || headline.label.contains("足り"), headline.label)
+        shot(app, "50-home-today")
+        let reserve = app.buttons["today.reserve"]
+        if reserve.waitForExistence(timeout: 3) {
+            reserve.tap()
+            wait(app.buttons["today.cancelReservation"], 10)
+            shot(app, "51-home-reserved")
+        }
+        app.swipeUp()
+        shot(app, "52-home-shortcuts")
+
+        // 自動化タブ
+        tab(app, "自動化")
+        wait(app.buttons["flowTile.g.tap.1h"])
+        shot(app, "53-flows-shortcuts")
+        app.buttons["オートメーション"].tap()
+        wait(app.switches["flowToggle.g.calendar.unlimited"])
+        shot(app, "54-flows-automations")
+        app.buttons["ギャラリー"].tap()
+        let add = wait(app.buttons["gallery.add.g.low.100"])
+        shot(app, "55-flows-gallery")
+        add.tap()
+        wait(app.switches["flowToggle.g.low.100"], 10)
+
+        // エディタ: 新しいオートメーション → 通知を足して保存
+        app.buttons["flows.add"].tap()
+        let newAutomation = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "新しいオートメーション")).firstMatch
+        wait(newAutomation).tap()
+        wait(app.buttons["flowEditor.trigger"])
+        shot(app, "56-editor-new")
+        app.buttons["flowEditor.addAction"].tap()
+        wait(app.buttons["pick.action.notify"]).tap()
+        app.buttons["flowEditor.addCondition"].tap()
+        wait(app.buttons["pick.condition.onCellular"]).tap()
+        shot(app, "57-editor-filled")
+        app.buttons["flowEditor.save"].tap()
+        let saved = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "新しいオートメーション")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10), "保存したオートメーションが一覧に出ない")
+
+        // ショートカット: 1時間使い放題をタップ → 確認 → その場で購入(使い放題中になる)
+        app.buttons["ショートカット"].tap()
+        wait(app.buttons["flowTile.g.tap.1h"]).tap()
+        let run = app.sheets.buttons["実行する"].exists ? app.sheets.buttons["実行する"] : app.buttons["実行する"].firstMatch
+        wait(run).tap()
+        tab(app, "ホーム")
+        XCTAssertTrue(app.staticTexts["使い放題中"].waitForExistence(timeout: 25), "ショートカットで購入されていない")
+        shot(app, "58-home-after-shortcut")
+    }
+
     // 4. ダークモード
     func test4_DarkMode() {
         let app = launch(["-skipOnboarding", "-forceDark", "-mockScenario", "low", "-deviceBattery", "60"])
@@ -211,8 +268,11 @@ final class FlowUITests: XCTestCase {
         app.buttons["home.runNow"].tap()
         wait(app.buttons["pending.execute"], 20)
         shot(app, "31-dark-pending")
-        tab(app, "ルール")
-        shot(app, "32-dark-rules")
+        tab(app, "自動化")
+        shot(app, "32-dark-automations")
+        tab(app, "ホーム")
+        app.swipeUp()
+        shot(app, "34-dark-home-today")
         tab(app, "履歴")
         shot(app, "33-dark-activity")
     }

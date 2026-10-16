@@ -178,6 +178,23 @@ extension OutcomeStatus {
 }
 
 extension ActionMode {
+    /// "off" / "confirm" / "auto" から(オートメーションの保存形式)。
+    static func named(_ s: String) -> ActionMode {
+        switch s {
+        case "off": return .off
+        case "auto": return .auto
+        default: return .confirm
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .off: return "off"
+        case .confirm: return "confirm"
+        case .auto: return "auto"
+        }
+    }
+
     var label: String {
         switch self {
         case .off: return "しない"

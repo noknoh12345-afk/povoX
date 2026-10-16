@@ -51,8 +51,8 @@ struct MainTabs: View {
                 .tabItem { Label("履歴", systemImage: "clock.arrow.circlepath") }
                 .tag(AppTab.activity)
                 .badge(store.pending.count)
-            RulesView()
-                .tabItem { Label("ルール", systemImage: "curlybraces.square") }
+            AutomationsView()
+                .tabItem { Label("自動化", systemImage: "square.2.layers.3d.top.filled") }
                 .tag(AppTab.rules)
             CodesView()
                 .tabItem { Label("コード", systemImage: "ticket") }

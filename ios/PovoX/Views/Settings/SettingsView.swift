@@ -83,6 +83,33 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    LabeledContent {
+                        Text(store.calendarAccess == .authorized ? "許可済み" : (store.calendarAccess == .denied ? "許可されていません" : "未設定"))
+                    } label: {
+                        Label("カレンダー", systemImage: "calendar")
+                    }
+                    if store.calendarAccess != .authorized {
+                        Button("カレンダーを許可") { Task { await store.requestCalendar() } }
+                            .accessibilityIdentifier("settings.calendar")
+                    }
+                    Picker("外での使い方", selection: Binding(get: { store.usageIntensity }, set: { v in Task { await store.setUsageIntensity(v) } })) {
+                        Text("控えめ").tag(0)
+                        Text("ふつう").tag(1)
+                        Text("たくさん").tag(2)
+                    }
+                    Button {
+                        store.tab = .rules
+                    } label: {
+                        LabeledContent("オートメーション", value: "\(store.flows.filter(\.enabled).count)個 オン")
+                    }
+                    .foregroundStyle(.primary)
+                } header: {
+                    Text("予定とオートメーション")
+                } footer: {
+                    Text("予定は「今日のプラン」と、オートメーションの「予定の前」に使います。端末の外には送りません。「外での使い方」は、予定から必要な量を見積もるときの目安です。")
+                }
+
                 Section("アカウント") {
                     LabeledContent("ログイン中", value: store.status?.identifier ?? "—")
                     Toggle("モック(povo に通信しない)", isOn: Binding(get: { store.mock }, set: { confirmMock = $0 }))

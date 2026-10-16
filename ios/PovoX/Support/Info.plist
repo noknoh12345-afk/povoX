@@ -44,6 +44,10 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>予定から外出を見つけ、残量で足りるか・出かける前に何を入れておくと楽かを出すために読みます。予定は端末の外には送りません。</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>予定から外出を見つけ、残量で足りるか・出かける前に何を入れておくと楽かを出すために読みます。予定は端末の外には送りません。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>プリペイドカードなどに書かれたコードを読み取るために使います。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

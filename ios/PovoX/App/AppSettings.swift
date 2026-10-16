@@ -48,6 +48,20 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "location.enabled") }
     }
 
+    /// ルール(JavaScript)も、オートメーションと一緒に動かす。
+    var ruleEnabled: Bool {
+        get { bool("rule.enabled", true) }
+        set { defaults.set(newValue, forKey: "rule.enabled") }
+    }
+
+    /// 予定から見積もる使い方の濃さ: 0 控えめ / 1 ふつう / 2 たくさん。
+    var usageIntensity: Int {
+        get { defaults.object(forKey: "plan.intensity") as? Int ?? 1 }
+        set { defaults.set(newValue, forKey: "plan.intensity") }
+    }
+
+    var intensityFactor: Double { [0.5, 1.0, 1.8][max(0, min(2, usageIntensity))] }
+
     var notifyErrors: Bool {
         get { bool("notify.errors", true) }
         set { defaults.set(newValue, forKey: "notify.errors") }

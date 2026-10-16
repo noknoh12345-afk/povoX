@@ -1,15 +1,30 @@
 import SwiftUI
 
-/// ルール: 今のルール・シミュレーター・テンプレート・安全装置のまとめ。
+/// ルールのタブ(単体で開くとき用。ふだんは「自動化」タブの中から開く)。
 struct RulesView: View {
+    var body: some View {
+        NavigationStack { RulesContent() }
+    }
+}
+
+/// ルール: 今のルール・シミュレーター・テンプレート・安全装置のまとめ。
+struct RulesContent: View {
     @EnvironmentObject var store: AppStore
     @State private var lastRun: RunRecord?
 
     var body: some View {
-        NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
                     StatusBanners()
+                    Card {
+                        Toggle(isOn: Binding(get: { store.ruleEnabled }, set: { store.setRuleEnabled($0) })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("ルールも動かす").font(.subheadline.weight(.semibold))
+                                Text("オフにすると、自動チェックではオートメーションだけが動きます。").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityIdentifier("rules.enabled")
+                    }
                     Card("今のルール", systemImage: "curlybraces.square", accessory: AnyView(Chip(text: store.ruleTitle, tint: .secondary))) {
                         Text(preview)
                             .font(.system(.caption, design: .monospaced))
@@ -98,7 +113,6 @@ struct RulesView: View {
             }
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("ルール")
-        }
     }
 
     private var preview: String {

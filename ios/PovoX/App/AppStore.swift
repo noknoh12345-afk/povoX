@@ -33,6 +33,15 @@ final class AppStore: ObservableObject {
     @Published var rule: String
     @Published var ruleTemplateID: String?
     @Published var ruleRecipeID: String?
+    /// オートメーション(内蔵のショートカット)。
+    @Published var flows: [Flow] = []
+    @Published var flowMemory = FlowMemory()
+    /// 予定と残量から作る、今日・明日のプラン。
+    @Published var today: DayPlanner.Plan?
+    @Published var tomorrow: DayPlanner.Plan?
+    @Published var calendarAccess: CalendarService.Access = .notDetermined
+    @Published var ruleEnabled: Bool
+    @Published var usageIntensity: Int
 
     let services: AppServices
     private var foregroundTimer: Timer?
@@ -44,9 +53,17 @@ final class AppStore: ObservableObject {
         rule = RuleLibrary.currentSource(settings: services.settings)
         ruleTemplateID = services.settings.ruleSource == nil ? RuleLibrary.defaultID : services.settings.ruleTemplateID
         ruleRecipeID = services.settings.ruleRecipeID
+        ruleEnabled = services.settings.ruleEnabled
+        usageIntensity = services.settings.usageIntensity
+        flows = services.flows.flows()
+        flowMemory = services.flows.memory()
+        calendarAccess = services.calendar.access
         if let t = services.launch.tab, let tab = AppTab(rawValue: t) { self.tab = tab }
         observers.append(NotificationCenter.default.addObserver(forName: .povoxDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.reload() }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: .povoxFlowsChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.reloadFlows() }
         })
         observers.append(NotificationCenter.default.addObserver(forName: .povoxOpenRoute, object: nil, queue: .main) { [weak self] note in
             let info = note.userInfo ?? [:]
@@ -89,6 +106,141 @@ final class AppStore: ObservableObject {
         pending = r.7
         logs = r.8
         ledger = r.9
+        reloadFlows()
+        await reloadPlans()
+    }
+
+    // MARK: - オートメーション
+
+    func reloadFlows() {
+        flows = services.flows.flows()
+        flowMemory = services.flows.memory()
+        calendarAccess = services.calendar.access
+    }
+
+    func reloadPlans() async {
+        if let p = await services.dayPlans() {
+            today = p.today
+            tomorrow = p.tomorrow
+        } else {
+            today = nil
+            tomorrow = nil
+        }
+        calendarAccess = services.calendar.access
+    }
+
+    func flow(_ id: String) -> Flow? { flows.first { $0.id == id } }
+
+    func saveFlow(_ f: Flow) {
+        services.flows.upsert(f)
+        reloadFlows()
+        Task { await services.rescheduleFlows() }
+    }
+
+    func deleteFlow(_ id: String) {
+        services.flows.delete(id)
+        reloadFlows()
+        Task { await services.rescheduleFlows() }
+    }
+
+    func setFlowEnabled(_ id: String, _ on: Bool) {
+        services.flows.setEnabled(id, on)
+        reloadFlows()
+        Task { await services.rescheduleFlows() }
+    }
+
+    /// 並べ替え(ショートカットの並び)。
+    func moveFlows(_ ids: [String]) {
+        var list = services.flows.flows()
+        list.sort { (ids.firstIndex(of: $0.id) ?? Int.max) < (ids.firstIndex(of: $1.id) ?? Int.max) }
+        services.flows.save(list)
+        reloadFlows()
+    }
+
+    @discardableResult
+    func addFromGallery(_ t: FlowTemplate) -> Flow {
+        let f = FlowGallery.instantiate(t)
+        saveFlow(f)
+        toast = "「\(f.name)」を追加しました"
+        return f
+    }
+
+    /// オートメーションを今すぐ実行(きっかけは見ない。条件と安全装置は通る)。
+    @discardableResult
+    func runFlow(_ f: Flow) async -> RunRecord? {
+        await runFlowTrigger("flow:\(f.id)", args: [:], label: f.name)
+    }
+
+    /// 保存しないオートメーションをその場で実行(今日のプランの「今すぐ」)。
+    @discardableResult
+    func runAdHoc(_ f: Flow) async -> RunRecord? {
+        guard let data = try? JSONEncoder().encode(f), let json = String(data: data, encoding: .utf8) else { return nil }
+        return await runFlowTrigger("flow:\(f.id)", args: ["adhoc": json], label: f.name)
+    }
+
+    private func runFlowTrigger(_ trigger: String, args: [String: String], label: String) async -> RunRecord? {
+        busy.insert("flow")
+        defer { busy.remove("flow") }
+        let r = await services.automation.run(trigger: trigger, args: args)
+        await reload()
+        // 買った・コードを入れたなら、残量と「使い放題中」を取り直す
+        if let r, r.outcomes.contains(where: { ($0.kind == .buy || $0.kind == .applyCode) && $0.status == .done }) {
+            await refresh(force: true)
+        }
+        if let r {
+            toast = r.error.map { "エラー: \($0)" } ?? "\(label): \(r.summary)"
+        } else if status?.halted != nil {
+            alert = AlertMessage(title: "通信を止めています", message: "安全のため povo への通信を止めています。原因を確認してから「通信を再開」を押してください。")
+        } else if !loggedIn {
+            alert = AlertMessage(title: "ログインしていません", message: "先にログインしてください。")
+        } else {
+            toast = "前の自動チェックがまだ動いています"
+        }
+        return r
+    }
+
+    /// 今日のプランの提案を予約する(その時刻に1回だけ。作ったときに実行を決めたものとして、確認なしで動く)。
+    @discardableResult
+    func reserve(_ s: DayPlanner.Suggestion, plan: DayPlanner.Plan) -> Flow {
+        let f = Flow(name: "予約: \(s.what)", symbol: "calendar.badge.clock", color: "orange",
+                     trigger: .once(s.at), conditions: s.action.kind == .buyUnlimited ? [.unlimitedInactive] : [],
+                     actions: [s.action], ask: false, preconfirmed: true)
+        saveFlow(f)
+        toast = "\(DayPlanner.hm(s.at)) に「\(s.what)」を予約しました"
+        return f
+    }
+
+    /// 今日のプランの提案を今すぐ実行する。
+    func runSuggestionNow(_ s: DayPlanner.Suggestion) async {
+        let f = Flow(name: s.what, symbol: "bolt.fill", trigger: .manual(), actions: [s.action], ask: false)
+        await runAdHoc(f)
+    }
+
+    /// その予約がすでにあるか(同じ時刻・同じこと)。
+    func reservation(for s: DayPlanner.Suggestion) -> Flow? {
+        let ms = Int64(s.at.timeIntervalSince1970 * 1000)
+        return flows.first { $0.enabled && $0.trigger.kind == .once && abs(($0.trigger.atMs ?? 0) - ms) < 60_000 && $0.actions.first?.kind == s.action.kind }
+    }
+
+    func requestCalendar() async {
+        let ok = await services.calendar.requestAccess()
+        calendarAccess = services.calendar.access
+        if !ok && calendarAccess == .denied {
+            alert = AlertMessage(title: "カレンダーを読めません", message: "設定アプリ → プライバシーとセキュリティ → カレンダー で povoX を「フルアクセス」にしてください。")
+        }
+        await reloadPlans()
+        await services.rescheduleFlows()
+    }
+
+    func setRuleEnabled(_ on: Bool) {
+        services.settings.ruleEnabled = on
+        ruleEnabled = on
+    }
+
+    func setUsageIntensity(_ v: Int) async {
+        services.settings.usageIntensity = v
+        usageIntensity = v
+        await reloadPlans()
     }
 
     // MARK: - 残量・一覧(通信あり)
@@ -159,6 +311,7 @@ final class AppStore: ObservableObject {
     func finishOnboarding() async {
         if !services.launch.uiTest {
             _ = await services.notifications.requestAuthorization()
+            _ = await services.calendar.requestAccess()
         }
         services.settings.onboardingDone = true
         onboardingDone = true

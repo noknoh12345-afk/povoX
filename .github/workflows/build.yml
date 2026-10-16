@@ -39,6 +39,9 @@ jobs:
         working-directory: core
         run: cargo test --lib
 
+      - name: Automations logic (Swift, no iOS)
+        run: sh tools/flow-check.sh
+
       - name: Swift bindings (UniFFI)
         working-directory: core
         run: |

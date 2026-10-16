@@ -21,6 +21,7 @@ struct PovoXApp: App {
                     await store.reload()
                     await store.refresh(force: false)
                     store.startForeground()
+                    await AppServices.shared.rescheduleFlows()
                 }
             case .background:
                 store.stopForeground()

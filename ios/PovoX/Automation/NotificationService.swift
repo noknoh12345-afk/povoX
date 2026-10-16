@@ -12,6 +12,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     var onConfirm: ((String) async -> ActionOutcome?)?
     var onDismiss: ((String) async -> Void)?
     var onOpen: (([AnyHashable: Any]) -> Void)?
+    /// 予約した通知の「実行する」(オートメーションの ID と、その回)。
+    var onRunFlow: ((String, String?) async -> Void)?
     /// 記録用(通知の操作を受け取ったことをログに残す)。
     var onLog: ((String) -> Void)?
     /// UI テストでは通知を出さない。
@@ -29,7 +31,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         let open = UNNotificationAction(identifier: "POVOX_OPEN", title: "認証する", options: [.foreground])
         let threeDS = UNNotificationCategory(identifier: NotificationService.threeDSCategory, actions: [open],
                                              intentIdentifiers: [], options: [])
-        center.setNotificationCategories([confirm, threeDS])
+        let run = UNNotificationAction(identifier: FlowScheduler.runAction, title: "実行する", options: [.authenticationRequired])
+        let flow = UNNotificationCategory(identifier: FlowScheduler.category, actions: [run], intentIdentifiers: [], options: [])
+        center.setNotificationCategories([confirm, threeDS, flow])
     }
 
     func requestAuthorization() async -> Bool {
@@ -86,6 +90,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         switch action {
         case NotificationService.executeAction: onLog?("通知の「実行する」が押されました")
         case NotificationService.dismissAction: onLog?("通知の「やめる」が押されました")
+        case FlowScheduler.runAction: onLog?("オートメーションの通知の「実行する」が押されました")
         default: break
         }
         let done = { DispatchQueue.main.async { completionHandler() } }
@@ -97,6 +102,14 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
                 if let outcome = await confirm(pid) {
                     await self.post([NotificationPlanner.plan(forConfirmed: outcome)])
                 }
+                done()
+            }
+        case FlowScheduler.runAction:
+            guard let fid = info["flow_id"] as? String, let runFlow = onRunFlow else { return done() }
+            let occ = info["occ"] as? String
+            // 実行が終わるまで完了ハンドラを呼ばない(その間 iOS がアプリを動かしておく)
+            Task {
+                await runFlow(fid, occ)
                 done()
             }
         case NotificationService.dismissAction:
