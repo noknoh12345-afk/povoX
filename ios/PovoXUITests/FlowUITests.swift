@@ -254,8 +254,9 @@ final class FlowUITests: XCTestCase {
         // ショートカット: 1時間使い放題をタップ → 確認 → その場で購入(使い放題中になる)
         app.buttons["ショートカット"].tap()
         wait(app.buttons["flowTile.g.tap.1h"]).tap()
-        let run = app.sheets.buttons["実行する"].exists ? app.sheets.buttons["実行する"] : app.buttons["実行する"].firstMatch
-        wait(run).tap()
+        // 確認ダイアログの「実行する」(同じ名前の要素が複数見えることがあるので最初の1つ)
+        let sheetRun = app.sheets.buttons["実行する"].firstMatch
+        if sheetRun.waitForExistence(timeout: 5) { sheetRun.tap() } else { wait(app.buttons["実行する"].firstMatch).tap() }
         tab(app, "ホーム")
         XCTAssertTrue(app.staticTexts["使い放題中"].waitForExistence(timeout: 25), "ショートカットで購入されていない")
         shot(app, "58-home-after-shortcut")
